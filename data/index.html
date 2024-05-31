@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <title>ESP32 WiFi Setup</title>
+    <link rel="stylesheet" type="text/css" href="/style.css">
+    <script>
+        function updateStatus() {
+            fetch('/status')
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('connection-status').innerText = data.connected ? 'Connected to WiFi' : 'Not connected to WiFi';
+                    document.getElementById('signal-strength').innerText = 'Signal strength: ' + data.rssi + ' dBm';
+                });
+        }
+
+        function scanNetworks() {
+            fetch('/scan')
+                .then(response => response.json())
+                .then(data => {
+                    let networks = data.networks;
+                    let networkList = document.getElementById('network-list');
+                    networkList.innerHTML = '';
+
+                    networks.forEach(network => {
+                        let option = document.createElement('option');
+                        option.value = network.ssid;
+                        option.innerText = network.ssid + ' (' + network.rssi + ' dBm)';
+                        networkList.appendChild(option);
+                    });
+
+                    document.getElementById('networks').style.display = 'block';
+                });
+        }
+
+        function connect() {
+            let ssid = document.getElementById('network-list').value;
+            let password = document.getElementById('password').value;
+
+            fetch('/connect', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                body: 'ssid=' + encodeURIComponent(ssid) + '&password=' + encodeURIComponent(password)
+            })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'connected') {
+                        alert('Connected successfully');
+                        updateStatus();
+                    } else {
+                        alert('Failed to connect');
+                    }
+                });
+        }
+
+        setInterval(updateStatus, 5000);
+        window.onload = updateStatus;
+    </script>
+</head>
+<body>
+<div class="container">
+    <h1>ESP32 WiFi Setup</h1>
+    <div id="connection-status"></div>
+    <div id="signal-strength"></div>
+    <p><button onclick="scanNetworks()" class="button">Scan for networks</button></p>
+    <div id="networks" style="display:none;">
+        <select id="network-list"></select><br><br>
+        Password: <input type="password" id="password"><br><br>
+        <button onclick="connect()" class="button">Connect</button>
+    </div>
+</div>
+</body>
+</html>
