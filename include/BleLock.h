@@ -60,6 +60,8 @@ private:
 BleLock::BleLock(std::string  lockName)
         : lockName(std::move(lockName)), pServer(nullptr), pService(nullptr), pPublicCharacteristic(nullptr), autoincrement(0) {
     memoryFilename = "/ble_lock_memory.json";
+    loadCharacteristicsFromMemory();
+    setup();
 }
 
 void BleLock::setup() {
