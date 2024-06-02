@@ -2,18 +2,21 @@
 #include "WiFiManager.h"
 #include "TemperatureMonitor.h"
 
+WiFiManager wifiManager;
+TemperatureMonitor tempMonitor;
+
 void setup() {
     Serial.begin(115200);
-    WiFiManager::begin();
-    TemperatureMonitor::begin();
+    wifiManager.begin();
+    tempMonitor.begin();
 }
 
 void loop() {
-    WiFiManager::loop();
+    wifiManager.loop();
 
     static unsigned long lastTempCheck = 0;
     if (millis() - lastTempCheck >= 10000) {
-        float temperature = TemperatureMonitor::getTemperature();
+        float temperature = tempMonitor.getTemperature();
         Serial.printf("CPU Temperature: %.2f °C\n", temperature);
         lastTempCheck = millis();
     }

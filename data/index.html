@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html>
 <head>
     <title>ESP32 WiFi Setup</title>
     <link rel="stylesheet" type="text/css" href="/style.css">
@@ -47,6 +47,7 @@
                 .then(data => {
                     if (data.status === 'connected') {
                         alert('Connected successfully');
+                        document.getElementById('ip-address').innerText = 'IP Address: ' + data.ip;
                         updateStatus();
                     } else {
                         alert('Failed to connect');
@@ -63,6 +64,7 @@
     <h1>ESP32 WiFi Setup</h1>
     <div id="connection-status"></div>
     <div id="signal-strength"></div>
+    <div id="ip-address"></div>
     <p><button onclick="scanNetworks()" class="button">Scan for networks</button></p>
     <div id="networks" style="display:none;">
         <select id="network-list"></select><br><br>

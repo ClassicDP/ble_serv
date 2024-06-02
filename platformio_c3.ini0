@@ -15,8 +15,8 @@ build_unflags =
     ${common.build_unflags}
 
 upload_speed = 115200
-monitor_port = 	/dev/tty.usbmodem1101
-upload_port = 	/dev/tty.usbmodem1101
+monitor_port = 	/dev/tty.usbmodem11301
+upload_port = 	/dev/tty.usbmodem11301
 
 [env:myenv]
 lib_deps =
