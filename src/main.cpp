@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include "WiFiManager.h"
 #include "TemperatureMonitor.h"
+#include "BleLock.h"
 
 WiFiManager wifiManager;
 TemperatureMonitor tempMonitor;
@@ -9,6 +10,7 @@ void setup() {
     Serial.begin(115200);
     wifiManager.begin();
     tempMonitor.begin();
+    BleLock lock();
 }
 
 void loop() {
