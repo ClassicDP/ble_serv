@@ -3,10 +3,6 @@
 WiFiManager::WiFiManager() : server(80) {}
 
 void WiFiManager::begin() {
-    if (!SPIFFS.begin(true)) {
-        Serial.println("An error has occurred while mounting SPIFFS");
-        return;
-    }
 
     preferences.begin("WiFiManager", false);
     connectToSavedNetwork();
