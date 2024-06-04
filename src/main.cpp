@@ -22,7 +22,7 @@ void setup() {
 void loop() {
     wifiManager.loop();
     static unsigned long lastTempCheck = 0;
-    if (millis() - lastTempCheck >= 1000) {
+    if (millis() - lastTempCheck >= 10000) {
         float temperature = tempMonitor.getTemperature();
         Serial.printf("CPU Temperature: %.2f °C\n", temperature);
         lastTempCheck = millis();

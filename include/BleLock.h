@@ -29,10 +29,21 @@ class UniqueCharacteristicCallbacks : public BLECharacteristicCallbacks {
 public:
     UniqueCharacteristicCallbacks(BleLock* lock, std::string uuid);
     void onWrite(BLECharacteristic* pCharacteristic) override;
+    void onRead(BLECharacteristic* pCharacteristic) override;
 
 private:
     BleLock* lock;
     std::string uuid;
+};
+
+class ServerCallbacks : public BLEServerCallbacks {
+public:
+    explicit ServerCallbacks(BleLock* lock);
+    void onConnect(BLEServer* pServer) override;
+    void onDisconnect(BLEServer* pServer) override;
+
+private:
+    BleLock* lock;
 };
 
 struct ResponseMessage {
@@ -44,7 +55,9 @@ class BleLock {
 public:
     explicit BleLock(std::string lockName);
     void setup();
+
     [[noreturn]] static void characteristicCreationTask(void* pvParameter);
+
     [[noreturn]] static void responseMessageTask(void* pvParameter);
 
 private:
@@ -61,14 +74,18 @@ private:
     uint16_t autoincrement;
     QueueHandle_t characteristicCreationQueue;
     QueueHandle_t responseMessageQueue;
+    SemaphoreHandle_t bleMutex;  // Mutex for thread-safe operations
 
     void loadCharacteristicsFromMemory();
     void saveCharacteristicsToMemory();
     void resumeAdvertising();
-    void restartService();
+    void stopService();
+    void startService();
 
+    void initializeMutex();
     friend class PublicCharacteristicCallbacks;
     friend class UniqueCharacteristicCallbacks;
+    friend class ServerCallbacks;
 };
 
 #endif // BLELOCK_H
