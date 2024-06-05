@@ -1,4 +1,5 @@
 #include "BleLock.h"
+#include "MessageBase.h"
 
 PublicCharacteristicCallbacks::PublicCharacteristicCallbacks(BleLock *lock) : lock(lock) {}
 
@@ -11,19 +12,54 @@ UniqueCharacteristicCallbacks::UniqueCharacteristicCallbacks(BleLock *lock, std:
 
 void UniqueCharacteristicCallbacks::onWrite(BLECharacteristic *pCharacteristic) {
     // Подтверждение получения характеристики ключом
-    lock->confirmedCharacteristics[uuid] = true;
-    lock->saveCharacteristicsToMemory();
+    if (!lock->confirmedCharacteristics[uuid]) {
+        lock->confirmedCharacteristics[uuid] = true;
+        lock->saveCharacteristicsToMemory();
+    }
 
-    // Handle message from client
+    // Обработка сообщения от клиента
     std::string receivedMessage = pCharacteristic->getValue();
-    Serial.printf("Received message on %s: %s\n", uuid.c_str(), receivedMessage.c_str());
+    auto msg = MessageBase::createInstance(receivedMessage);
+    if (msg) {
+        msg->sourceAddress = uuid.c_str();
+        Serial.printf("Received request from: %s with type: %s\n", msg->sourceAddress.c_str(), msg->type.c_str());
 
-    // Allocate memory for the response message
-    auto *responseMessage = new ResponseMessage{uuid, "Message received: " + receivedMessage};
+        // Обработка запроса
+        MessageBase *responseMessage = msg->processRequest(lock);
 
-    // Send a response back to the client through the queue
-    xQueueSend(lock->responseMessageQueue, &responseMessage, portMAX_DELAY);
+        // Отправка исходящего сообщения
+        if (responseMessage) {
+            xQueueSend(lock->outgoingQueue, &responseMessage, portMAX_DELAY);
+        } else {
+            auto responseMessageStr = new std::string(receivedMessage);
+            xQueueSend(lock->responseQueue, &responseMessageStr, portMAX_DELAY);
+        }
+    } else {
+        Serial.println("Failed to create message instance");
+    }
 }
+
+MessageBase* BleLock::request(MessageBase* requestMessage, const String& destAddr, uint32_t timeout = portMAX_DELAY) {
+    // Установка адресов
+    requestMessage->sourceAddress = "local_address";  // Установите ваш локальный адрес
+    requestMessage->destinationAddress = destAddr;
+
+    // Отправка запроса через очередь
+    if (xQueueSend(outgoingQueue, &requestMessage, portMAX_DELAY) != pdPASS) {
+        Serial.println("Failed to send request to the outgoing queue");
+        return nullptr;
+    }
+
+    std::string *receivedMessage;
+    // Получение ответа
+    if (xQueueReceive(responseQueue, &receivedMessage, pdMS_TO_TICKS(timeout)) == pdTRUE) {
+        MessageBase* instance = MessageBase::createInstance(*receivedMessage);
+        delete receivedMessage;
+        return instance;
+    }
+    return nullptr;
+}
+
 
 void UniqueCharacteristicCallbacks::onRead(BLECharacteristic *pCharacteristic) {
     Serial.println("UniqueCharacteristicCallbacks::onRead");
@@ -45,9 +81,13 @@ BleLock::BleLock(std::string lockName)
         : lockName(std::move(lockName)), pServer(nullptr), pService(nullptr), pPublicCharacteristic(nullptr),
           autoincrement(0) {
     memoryFilename = "/ble_lock_memory.json";
+    Serial.println("xQueueCreate ");
     characteristicCreationQueue = xQueueCreate(10, sizeof(std::string *));
-    responseMessageQueue = xQueueCreate(10, sizeof(ResponseMessage *));
+    outgoingQueue = xQueueCreate(10, sizeof(MessageBase *));
+    responseQueue = xQueueCreate(10, sizeof(std::string *));
+    Serial.println("initializeMutex ");
     initializeMutex();
+    Serial.println("done ");
 
 }
 
@@ -83,7 +123,12 @@ void BleLock::setup() {
     Serial.println("BLE setup complete");
 
     xTaskCreate(characteristicCreationTask, "CharacteristicCreationTask", 4096, this, 1, nullptr);
-    xTaskCreate(responseMessageTask, "ResponseMessageTask", 4096, this, 1, nullptr);
+    xTaskCreate(outgoingMessageTask, "OutgoingMessageTask", 4096, this, 1, nullptr);
+}
+
+
+QueueHandle_t BleLock::getOutgoingQueueHandle() {
+    return outgoingQueue;
 }
 
 void BleLock::initializeMutex() {
@@ -186,6 +231,9 @@ void BleLock::startService() {
     }
 }
 
+
+
+
 [[noreturn]] void BleLock::characteristicCreationTask(void *pvParameter) {
     auto *bleLock = static_cast<BleLock *>(pvParameter);
     std::string *uuid;
@@ -215,16 +263,16 @@ void BleLock::startService() {
     }
 }
 
-[[noreturn]] void BleLock::responseMessageTask(void *pvParameter) {
+[[noreturn]] void BleLock::outgoingMessageTask(void *pvParameter) {
     auto *bleLock = static_cast<BleLock *>(pvParameter);
-    ResponseMessage *responseMessage;
+    MessageBase *responseMessage;
     while (true) {
-        if (xQueueReceive(bleLock->responseMessageQueue, &responseMessage, portMAX_DELAY) == pdTRUE) {
-            Serial.printf(" BleLock::responseMessageTask msg: %s %s \n", responseMessage->uuid.c_str(),
-                          responseMessage->message.c_str());
-            if (bleLock->uniqueCharacteristics.find(responseMessage->uuid) != bleLock->uniqueCharacteristics.end()) {
-                BLECharacteristic *characteristic = bleLock->uniqueCharacteristics[responseMessage->uuid];
-                characteristic->setValue(responseMessage->message);
+        if (xQueueReceive(bleLock->outgoingQueue, &responseMessage, portMAX_DELAY) == pdTRUE) {
+            Serial.printf(" BleLock::responseMessageTask msg: %s %s \n", responseMessage->destinationAddress.c_str(),
+                          responseMessage->type.c_str());
+            if (bleLock->uniqueCharacteristics.find(responseMessage->destinationAddress.c_str()) != bleLock->uniqueCharacteristics.end()) {
+                BLECharacteristic *characteristic = bleLock->uniqueCharacteristics[responseMessage->destinationAddress.c_str()];
+                characteristic->setValue(responseMessage->serialize().c_str());
                 characteristic->notify();
             }
             delete responseMessage;  // Free the allocated memory
@@ -232,3 +280,4 @@ void BleLock::startService() {
         }
     }
 }
+

@@ -2,9 +2,9 @@
 #include "WiFiManager.h"
 #include "TemperatureMonitor.h"
 #include "BleLock.h"
+#include "MessageBase.h"
 
 WiFiManager wifiManager;
-TemperatureMonitor tempMonitor;
 BleLock lock("BleLock");
 
 void setup() {
@@ -14,7 +14,7 @@ void setup() {
         return;
     }
     wifiManager.begin();
-    tempMonitor.begin();
+    TemperatureMonitor::begin();
     lock.setup();
 
 }
@@ -23,7 +23,7 @@ void loop() {
     wifiManager.loop();
     static unsigned long lastTempCheck = 0;
     if (millis() - lastTempCheck >= 10000) {
-        float temperature = tempMonitor.getTemperature();
+        float temperature = TemperatureMonitor::getTemperature();
         Serial.printf("CPU Temperature: %.2f °C\n", temperature);
         lastTempCheck = millis();
     }

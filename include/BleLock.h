@@ -13,6 +13,8 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include <freertos/task.h>
+#include <set>
+#include "MessageBase.h"
 
 class BleLock;
 
@@ -51,30 +53,38 @@ struct ResponseMessage {
     std::string message;
 };
 
+struct Command {
+    std::string message;
+};
+
 class BleLock {
 public:
     explicit BleLock(std::string lockName);
     void setup();
+    QueueHandle_t getOutgoingQueueHandle();
 
     [[noreturn]] static void characteristicCreationTask(void* pvParameter);
 
-    [[noreturn]] static void responseMessageTask(void* pvParameter);
+    [[noreturn]] static void outgoingMessageTask(void* pvParameter);
+    std::set<std::string> awaitingKeys;
+    SemaphoreHandle_t bleMutex;  // Mutex for thread-safe operations
 
 private:
     BLEServer* pServer;
     BLEService* pService;
     BLECharacteristic* pPublicCharacteristic;
     std::string generateUUID();
-    void handlePublicCharacteristicRead(BLECharacteristic* pCharacteristic);
 
+    void handlePublicCharacteristicRead(BLECharacteristic* pCharacteristic);
     std::string lockName;
     std::map<std::string, BLECharacteristic*> uniqueCharacteristics;
     std::map<std::string, bool> confirmedCharacteristics;
     std::string memoryFilename;
     uint16_t autoincrement;
     QueueHandle_t characteristicCreationQueue;
-    QueueHandle_t responseMessageQueue;
-    SemaphoreHandle_t bleMutex;  // Mutex for thread-safe operations
+    QueueHandle_t outgoingQueue, responseQueue;
+
+
 
     void loadCharacteristicsFromMemory();
     void saveCharacteristicsToMemory();
@@ -86,6 +96,9 @@ private:
     friend class PublicCharacteristicCallbacks;
     friend class UniqueCharacteristicCallbacks;
     friend class ServerCallbacks;
+
+
+    MessageBase *request(MessageBase *requestMessage, const String &destAddr, uint32_t timeout);
 };
 
 #endif // BLELOCK_H
