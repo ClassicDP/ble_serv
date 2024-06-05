@@ -23,11 +23,7 @@ protected:
     }
 };
 
-// Регистрация конструктора
-bool registerResOk = []() {
-    MessageBase::registerConstructor("resOk", []() -> MessageBase * { return new ResOk(); });
-    return true;
-}();
+
 
 class ReqRegKey : public MessageBase {
 public:
@@ -44,7 +40,10 @@ public:
             lock->awaitingKeys.insert((new String(key))->c_str());
             xSemaphoreGive(lock->bleMutex);
         }
-        return new ResOk();
+        auto res = new ResOk();
+        res->destinationAddress = key;
+        res->sourceAddress = key;
+        return res;
     }
 
 
@@ -59,10 +58,6 @@ protected:
 
 };
 
-// Регистрация конструктора
-bool registerReqRegKey = []() {
-    MessageBase::registerConstructor("reqRegKey", []() -> MessageBase * { return new ReqRegKey(); });
-    return true;
-}();
+
 
 

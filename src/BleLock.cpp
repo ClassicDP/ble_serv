@@ -12,8 +12,8 @@ UniqueCharacteristicCallbacks::UniqueCharacteristicCallbacks(BleLock *lock, std:
 
 void UniqueCharacteristicCallbacks::onWrite(BLECharacteristic *pCharacteristic) {
     // Подтверждение получения характеристики ключом
-    if (!lock->confirmedCharacteristics[uuid]) {
-        lock->confirmedCharacteristics[uuid] = true;
+    if (!lock->confirmedCharacteristics[std::string (uuid)]) {
+        lock->confirmedCharacteristics[std::string (uuid)] = true;
         lock->saveCharacteristicsToMemory();
     }
 
@@ -39,19 +39,16 @@ void UniqueCharacteristicCallbacks::onWrite(BLECharacteristic *pCharacteristic) 
     }
 }
 
-MessageBase* BleLock::request(MessageBase* requestMessage, const String& destAddr, uint32_t timeout = portMAX_DELAY) {
-    // Установка адресов
-    requestMessage->sourceAddress = "local_address";  // Установите ваш локальный адрес
-    requestMessage->destinationAddress = destAddr;
+MessageBase* BleLock::request(MessageBase* requestMessage, const std::string& destAddr, uint32_t timeout) {
+    requestMessage->sourceAddress = "local_address";
+    requestMessage->destinationAddress = destAddr.c_str();
 
-    // Отправка запроса через очередь
     if (xQueueSend(outgoingQueue, &requestMessage, portMAX_DELAY) != pdPASS) {
         Serial.println("Failed to send request to the outgoing queue");
         return nullptr;
     }
 
-    std::string *receivedMessage;
-    // Получение ответа
+    std::string* receivedMessage;
     if (xQueueReceive(responseQueue, &receivedMessage, pdMS_TO_TICKS(timeout)) == pdTRUE) {
         MessageBase* instance = MessageBase::createInstance(*receivedMessage);
         delete receivedMessage;
@@ -59,6 +56,7 @@ MessageBase* BleLock::request(MessageBase* requestMessage, const String& destAdd
     }
     return nullptr;
 }
+
 
 
 void UniqueCharacteristicCallbacks::onRead(BLECharacteristic *pCharacteristic) {
@@ -143,11 +141,10 @@ std::string BleLock::generateUUID() {
     sprintf(uuid, "%08x-%04x-%04x-%04x-%012x",
             esp_random(), autoincrement++ & 0xFFFF, (esp_random() & 0x0FFF) | 0x4000,
             (esp_random() & 0x3FFF) | 0x8000, esp_random());
-
-    saveCharacteristicsToMemory(); // Сохранить автоприращение после генерации UUID
-
+    saveCharacteristicsToMemory();
     return {uuid};
 }
+
 
 void BleLock::handlePublicCharacteristicRead(BLECharacteristic *pCharacteristic) {
     std::string newUUID = generateUUID();
@@ -160,16 +157,12 @@ void BleLock::loadCharacteristicsFromMemory() {
     if (SPIFFS.begin(true)) {
         File file = SPIFFS.open(memoryFilename.c_str(), FILE_READ);
         if (file) {
-            size_t size = file.size();
-            std::unique_ptr<char[]> buf(new char[size]);
-            file.readBytes(buf.get(), size);
-            file.close();
             JsonDocument doc;
-            DeserializationError error = deserializeJson(doc, buf.get());
+            DeserializationError error = deserializeJson(doc, file);
             if (!error) {
                 autoincrement = doc["autoincrement"] | 0;
                 JsonObject characteristics = doc["characteristics"].as<JsonObject>();
-                for (JsonPair kv: characteristics) {
+                for (JsonPair kv : characteristics) {
                     std::string uuid = kv.key().c_str();
                     bool confirmed = kv.value().as<bool>();
                     BLECharacteristic *characteristic = pService->createCharacteristic(
@@ -177,22 +170,23 @@ void BleLock::loadCharacteristicsFromMemory() {
                             BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE |
                             BLECharacteristic::PROPERTY_NOTIFY
                     );
-
                     characteristic->setCallbacks(new UniqueCharacteristicCallbacks(this, uuid));
                     uniqueCharacteristics[uuid] = characteristic;
                     confirmedCharacteristics[uuid] = confirmed;
                 }
             }
+            file.close();
         }
     }
 }
 
+
 void BleLock::saveCharacteristicsToMemory() {
-    JsonDocument doc;
+    JsonDocument doc;  // Увеличьте размер, если необходимо
     doc["autoincrement"] = autoincrement;
 
-    JsonObject characteristics = doc["characteristics"].to<JsonObject>();
-    for (const auto &pair: uniqueCharacteristics) {
+    JsonObject characteristics = doc["characteristics"].as<JsonObject>();
+    for (const auto &pair : uniqueCharacteristics) {
         if (confirmedCharacteristics[pair.first]) {
             characteristics[pair.first] = true;
         }
@@ -204,6 +198,7 @@ void BleLock::saveCharacteristicsToMemory() {
         file.close();
     }
 }
+
 
 void BleLock::resumeAdvertising() {
     BLEAdvertising *pAdvertising = pServer->getAdvertising();
@@ -249,8 +244,8 @@ void BleLock::startService() {
             Serial.printf(" - createCharacteristic \n");
             newCharacteristic->setCallbacks(new UniqueCharacteristicCallbacks(bleLock, *uuid));
             Serial.printf(" - setCallbacks \n");
-            bleLock->uniqueCharacteristics[*uuid] = newCharacteristic;
-            bleLock->confirmedCharacteristics[*uuid] = false;
+            bleLock->uniqueCharacteristics[std::string (*uuid)] = newCharacteristic;
+            bleLock->confirmedCharacteristics[std::string (*uuid)] = false;
 
             delete uuid;  // Free the allocated memory
 
@@ -268,14 +263,14 @@ void BleLock::startService() {
     MessageBase *responseMessage;
     while (true) {
         if (xQueueReceive(bleLock->outgoingQueue, &responseMessage, portMAX_DELAY) == pdTRUE) {
-            Serial.printf(" BleLock::responseMessageTask msg: %s %s \n", responseMessage->destinationAddress.c_str(),
+            Serial.printf("BleLock::responseMessageTask msg: %s %s \n", responseMessage->destinationAddress.c_str(),
                           responseMessage->type.c_str());
             if (bleLock->uniqueCharacteristics.find(responseMessage->destinationAddress.c_str()) != bleLock->uniqueCharacteristics.end()) {
                 BLECharacteristic *characteristic = bleLock->uniqueCharacteristics[responseMessage->destinationAddress.c_str()];
                 characteristic->setValue(responseMessage->serialize().c_str());
                 characteristic->notify();
             }
-            delete responseMessage;  // Free the allocated memory
+            delete responseMessage;
             bleLock->resumeAdvertising();
         }
     }

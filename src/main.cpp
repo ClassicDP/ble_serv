@@ -3,12 +3,23 @@
 #include "TemperatureMonitor.h"
 #include "BleLock.h"
 #include "MessageBase.h"
+#include "ReqRes.h"
 
 WiFiManager wifiManager;
 BleLock lock("BleLock");
 
 void setup() {
     Serial.begin(115200);
+    // Регистрация конструктора
+    bool registerResOk = []() {
+        MessageBase::registerConstructor("resOk", []() -> MessageBase * { return new ResOk(); });
+        return true;
+    }();
+    // Регистрация конструктора
+    bool registerReqRegKey = []() {
+        MessageBase::registerConstructor("reqRegKey", []() -> MessageBase * { return new ReqRegKey(); });
+        return true;
+    }();
     if (!SPIFFS.begin(true)) {
         Serial.println("An error has occurred while mounting SPIFFS");
         return;

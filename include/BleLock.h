@@ -97,8 +97,7 @@ private:
     friend class UniqueCharacteristicCallbacks;
     friend class ServerCallbacks;
 
-
-    MessageBase *request(MessageBase *requestMessage, const String &destAddr, uint32_t timeout);
+    MessageBase *request(MessageBase *requestMessage, const std::string &destAddr, uint32_t timeout);
 };
 
 #endif // BLELOCK_H
