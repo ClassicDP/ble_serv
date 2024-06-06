@@ -33,8 +33,8 @@ String MessageBase::serialize() const {
 void MessageBase::deserialize(const String& input) {
     JsonDocument doc;
     deserializeJson(doc, input);
-    type = doc["type"].as<String>();
-    sourceAddress = doc["sourceAddress"].as<String>();
-    destinationAddress = doc["destinationAddress"].as<String>();
+    type = doc["type"].as<std::string>();
+    sourceAddress = doc["sourceAddress"].as<std::string>();
+    destinationAddress = doc["destinationAddress"].as<std::string>();
     deserializeExtraFields(doc);
 }

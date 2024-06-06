@@ -4,12 +4,15 @@
 #include "BleLock.h"
 #include "MessageBase.h"
 #include "ReqRes.h"
+#include "esp_bt.h"
 
 WiFiManager wifiManager;
 BleLock lock("BleLock");
 
 void setup() {
     Serial.begin(115200);
+
+
     // Регистрация конструктора
     bool registerResOk = []() {
         MessageBase::registerConstructor("resOk", []() -> MessageBase * { return new ResOk(); });

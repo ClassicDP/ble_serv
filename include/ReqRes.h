@@ -27,7 +27,7 @@ protected:
 
 class ReqRegKey : public MessageBase {
 public:
-    String key;
+    std::string key;
 
     ReqRegKey() {
         type = "reqRegKey";
@@ -37,7 +37,7 @@ public:
     MessageBase *processRequest(void *context) override {
         auto lock = static_cast<BleLock *>( context);
         if (xSemaphoreTake(lock->bleMutex, portMAX_DELAY) == pdTRUE) {
-            lock->awaitingKeys.insert((new String(key))->c_str());
+            lock->awaitingKeys.insert(key);
             xSemaphoreGive(lock->bleMutex);
         }
         auto res = new ResOk();
@@ -53,7 +53,7 @@ protected:
     }
 
     void deserializeExtraFields(const JsonDocument &doc) override {
-        key = doc["key"].as<String>();
+        key = doc["key"].as<std::string>();
     }
 
 };

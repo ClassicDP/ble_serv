@@ -7,9 +7,9 @@
 
 class MessageBase {
 public:
-    String sourceAddress;
-    String destinationAddress;
-    String type;
+    std::string sourceAddress;
+    std::string destinationAddress;
+    std::string type;
 
     MessageBase() = default;
 

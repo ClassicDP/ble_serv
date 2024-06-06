@@ -1,6 +1,7 @@
 #include "BleLock.h"
 #include "MessageBase.h"
 
+
 PublicCharacteristicCallbacks::PublicCharacteristicCallbacks(BleLock *lock) : lock(lock) {}
 
 void PublicCharacteristicCallbacks::onRead(BLECharacteristic *pCharacteristic) {
@@ -26,6 +27,7 @@ void UniqueCharacteristicCallbacks::onWrite(BLECharacteristic *pCharacteristic) 
 
         // Обработка запроса
         MessageBase *responseMessage = msg->processRequest(lock);
+        delete msg;
 
         // Отправка исходящего сообщения
         if (responseMessage) {
@@ -93,6 +95,7 @@ void BleLock::setup() {
     Serial.println("Starting BLE setup...");
     loadCharacteristicsFromMemory();
     Serial.println("loadCharacteristicsFromMemory");
+
     BLEDevice::init(lockName);
     Serial.println("BLEDevice::init");
     pServer = BLEDevice::createServer();
@@ -265,13 +268,15 @@ void BleLock::startService() {
         if (xQueueReceive(bleLock->outgoingQueue, &responseMessage, portMAX_DELAY) == pdTRUE) {
             Serial.printf("BleLock::responseMessageTask msg: %s %s \n", responseMessage->destinationAddress.c_str(),
                           responseMessage->type.c_str());
-            if (bleLock->uniqueCharacteristics.find(responseMessage->destinationAddress.c_str()) != bleLock->uniqueCharacteristics.end()) {
+            if (bleLock->uniqueCharacteristics.find(responseMessage->destinationAddress) != bleLock->uniqueCharacteristics.end()) {
                 BLECharacteristic *characteristic = bleLock->uniqueCharacteristics[responseMessage->destinationAddress.c_str()];
                 characteristic->setValue(responseMessage->serialize().c_str());
                 characteristic->notify();
             }
             delete responseMessage;
             bleLock->resumeAdvertising();
+            Serial.print("free memory: ");
+            Serial.println(ESP.getFreeHeap());  // Вывод свободной памяти
         }
     }
 }
