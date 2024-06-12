@@ -1,7 +1,7 @@
 #include "BleLock.h"
-#include "MessageBase.h"
+#include <iostream>
 
-
+// Callbacks Implementation
 PublicCharacteristicCallbacks::PublicCharacteristicCallbacks(BleLock *lock) : lock(lock) {}
 
 void PublicCharacteristicCallbacks::onRead(BLECharacteristic *pCharacteristic) {
@@ -12,54 +12,56 @@ UniqueCharacteristicCallbacks::UniqueCharacteristicCallbacks(BleLock *lock, std:
         : lock(lock), uuid(std::move(uuid)) {}
 
 void UniqueCharacteristicCallbacks::onWrite(BLECharacteristic *pCharacteristic) {
-    // Подтверждение получения характеристики ключом
-    if (!lock->confirmedCharacteristics[std::string (uuid)]) {
-        lock->confirmedCharacteristics[std::string (uuid)] = true;
+    if (!lock->confirmedCharacteristics[uuid]) {
+        lock->confirmedCharacteristics[uuid] = true;
         lock->saveCharacteristicsToMemory();
     }
 
-    // Обработка сообщения от клиента
     std::string receivedMessage = pCharacteristic->getValue();
     auto msg = MessageBase::createInstance(receivedMessage);
     if (msg) {
-        msg->sourceAddress = uuid.c_str();
+        msg->sourceAddress = uuid;
         Serial.printf("Received request from: %s with type: %s\n", msg->sourceAddress.c_str(), msg->type.c_str());
 
-        // Обработка запроса
         MessageBase *responseMessage = msg->processRequest(lock);
         delete msg;
 
-        // Отправка исходящего сообщения
         if (responseMessage) {
-            xQueueSend(lock->outgoingQueue, &responseMessage, portMAX_DELAY);
+            Serial.println("Sending response message to outgoing queue");
+            if (xQueueSend(lock->outgoingQueue, &responseMessage, portMAX_DELAY) != pdPASS) {
+                Serial.println("Failed to send response message to outgoing queue");
+                delete responseMessage;
+            }
         } else {
             auto responseMessageStr = new std::string(receivedMessage);
-            xQueueSend(lock->responseQueue, &responseMessageStr, portMAX_DELAY);
+            Serial.println("Sending response message string to response queue");
+            if (xQueueSend(lock->responseQueue, &responseMessageStr, portMAX_DELAY) != pdPASS) {
+                Serial.println("Failed to send response message string to response queue");
+                delete responseMessageStr;
+            }
         }
     } else {
         Serial.println("Failed to create message instance");
     }
 }
 
-MessageBase* BleLock::request(MessageBase* requestMessage, const std::string& destAddr, uint32_t timeout) {
+MessageBase *BleLock::request(MessageBase *requestMessage, const std::string &destAddr, uint32_t timeout) const {
     requestMessage->sourceAddress = "local_address";
-    requestMessage->destinationAddress = destAddr.c_str();
+    requestMessage->destinationAddress = destAddr;
 
     if (xQueueSend(outgoingQueue, &requestMessage, portMAX_DELAY) != pdPASS) {
         Serial.println("Failed to send request to the outgoing queue");
         return nullptr;
     }
 
-    std::string* receivedMessage;
+    std::string *receivedMessage;
     if (xQueueReceive(responseQueue, &receivedMessage, pdMS_TO_TICKS(timeout)) == pdTRUE) {
-        MessageBase* instance = MessageBase::createInstance(*receivedMessage);
+        MessageBase *instance = MessageBase::createInstance(*receivedMessage);
         delete receivedMessage;
         return instance;
     }
     return nullptr;
 }
-
-
 
 void UniqueCharacteristicCallbacks::onRead(BLECharacteristic *pCharacteristic) {
     Serial.println("UniqueCharacteristicCallbacks::onRead");
@@ -88,47 +90,70 @@ BleLock::BleLock(std::string lockName)
     Serial.println("initializeMutex ");
     initializeMutex();
     Serial.println("done ");
-
 }
 
 void BleLock::setup() {
     Serial.println("Starting BLE setup...");
-    loadCharacteristicsFromMemory();
-    Serial.println("loadCharacteristicsFromMemory");
 
     BLEDevice::init(lockName);
-    Serial.println("BLEDevice::init");
+    Serial.println("BLEDevice::init completed");
+
     pServer = BLEDevice::createServer();
     if (!pServer) {
         Serial.println("Failed to create BLE server");
         return;
     }
-    pServer->setCallbacks(new ServerCallbacks(this));
+    Serial.println("BLE server created");
 
-    pService = pServer->createService(BLEUUID((uint16_t) 0xABCD));
+    pServer->setCallbacks(new ServerCallbacks(this));
+    Serial.println("Server callbacks set");
+
+    pService = pServer->createService(BLEUUID((uint16_t)0xABCD));
     if (!pService) {
         Serial.println("Failed to create service");
         return;
     }
+    Serial.println("Service created");
+
+    loadCharacteristicsFromMemory();
+    Serial.println("loadCharacteristicsFromMemory completed");
 
     pPublicCharacteristic = pService->createCharacteristic(
-            BLEUUID((uint16_t) 0xABCD),
-            BLECharacteristic::PROPERTY_READ
+            BLEUUID((uint16_t)0x1234), // Example UUID
+            NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE
     );
+    if (!pPublicCharacteristic) {
+        Serial.println("Failed to create public characteristic");
+        return;
+    }
+    Serial.println("Public characteristic created");
+
     pPublicCharacteristic->setCallbacks(new PublicCharacteristicCallbacks(this));
+    Serial.println("Public characteristic callbacks set");
 
     pService->start();
-    BLEAdvertising *pAdvertising = pServer->getAdvertising();
+    Serial.println("Service started");
+
+    BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+    if (!pAdvertising) {
+        Serial.println("Failed to get advertising");
+        return;
+    }
+    Serial.println("Advertising started");
     pAdvertising->start();
 
     Serial.println("BLE setup complete");
 
-    xTaskCreate(characteristicCreationTask, "CharacteristicCreationTask", 4096, this, 1, nullptr);
+    xTaskCreate(characteristicCreationTask, "CharacteristicCreationTask", 8192, this, 1, nullptr);
+    Serial.println("CharacteristicCreationTask created");
     xTaskCreate(outgoingMessageTask, "OutgoingMessageTask", 4096, this, 1, nullptr);
+    Serial.println("OutgoingMessageTask created");
 }
 
 
-QueueHandle_t BleLock::getOutgoingQueueHandle() {
+
+
+QueueHandle_t BleLock::getOutgoingQueueHandle() const {
     return outgoingQueue;
 }
 
@@ -148,7 +173,6 @@ std::string BleLock::generateUUID() {
     return {uuid};
 }
 
-
 void BleLock::handlePublicCharacteristicRead(BLECharacteristic *pCharacteristic) {
     std::string newUUID = generateUUID();
     auto *uuid = new std::string(newUUID);
@@ -157,51 +181,94 @@ void BleLock::handlePublicCharacteristicRead(BLECharacteristic *pCharacteristic)
 }
 
 void BleLock::loadCharacteristicsFromMemory() {
+    Serial.println("Attempting to mount SPIFFS...");
+
     if (SPIFFS.begin(true)) {
+        Serial.println("SPIFFS mounted successfully.");
         File file = SPIFFS.open(memoryFilename.c_str(), FILE_READ);
         if (file) {
-            JsonDocument doc;
-            DeserializationError error = deserializeJson(doc, file);
-            if (!error) {
-                autoincrement = doc["autoincrement"] | 0;
-                JsonObject characteristics = doc["characteristics"].as<JsonObject>();
-                for (JsonPair kv : characteristics) {
-                    std::string uuid = kv.key().c_str();
-                    bool confirmed = kv.value().as<bool>();
-                    BLECharacteristic *characteristic = pService->createCharacteristic(
-                            BLEUUID::fromString(uuid),
-                            BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE |
-                            BLECharacteristic::PROPERTY_NOTIFY
-                    );
-                    characteristic->setCallbacks(new UniqueCharacteristicCallbacks(this, uuid));
-                    uniqueCharacteristics[uuid] = characteristic;
-                    confirmedCharacteristics[uuid] = confirmed;
-                }
+            Serial.println("File opened successfully. Parsing JSON...");
+
+            json doc;
+            try {
+                doc = json::parse(file.readString().c_str());
+            } catch (json::parse_error &e) {
+                Serial.printf("Failed to parse JSON: %s\n", e.what());
+                file.close();
+                return;
             }
+
+            autoincrement = doc.value("autoincrement", 0);
+            Serial.printf("Autoincrement loaded: %d\n", autoincrement);
+
+            json characteristics = doc["characteristics"];
+            for (auto &kv: characteristics.items()) {
+                std::string uuid = kv.key();
+                bool confirmed = kv.value().get<bool>();
+                Serial.printf("Loading characteristic with UUID: %s, confirmed: %d\n", uuid.c_str(), confirmed);
+
+                if (!pService) {
+                    Serial.println("pService is null. Cannot create characteristic.");
+                    continue;
+                }
+
+                BLECharacteristic *characteristic = pService->createCharacteristic(
+                        BLEUUID::fromString(uuid),
+                        NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY
+                );
+
+                if (!characteristic) {
+                    Serial.printf("Failed to create characteristic with UUID: %s\n", uuid.c_str());
+                    continue;
+                }
+
+                characteristic->setCallbacks(new UniqueCharacteristicCallbacks(this, uuid));
+                uniqueCharacteristics[uuid] = characteristic;
+                confirmedCharacteristics[uuid] = confirmed;
+            }
+
             file.close();
+            Serial.println("All characteristics loaded successfully.");
+        } else {
+            Serial.println("Failed to open file. File may not exist.");
+        }
+    } else {
+        Serial.println("SPIFFS mount failed, attempting to format...");
+        if (SPIFFS.format()) {
+            Serial.println("SPIFFS formatted successfully.");
+            if (SPIFFS.begin()) {
+                Serial.println("SPIFFS mounted successfully after formatting.");
+            } else {
+                Serial.println("Failed to mount SPIFFS after formatting.");
+            }
+        } else {
+            Serial.println("SPIFFS formatting failed.");
         }
     }
 }
 
 
+
+
 void BleLock::saveCharacteristicsToMemory() {
-    JsonDocument doc;  // Увеличьте размер, если необходимо
+    json doc;
     doc["autoincrement"] = autoincrement;
 
-    JsonObject characteristics = doc["characteristics"].as<JsonObject>();
-    for (const auto &pair : uniqueCharacteristics) {
+    json characteristics;
+    for (const auto &pair: uniqueCharacteristics) {
         if (confirmedCharacteristics[pair.first]) {
             characteristics[pair.first] = true;
         }
     }
+    doc["characteristics"] = characteristics;
 
     File file = SPIFFS.open(memoryFilename.c_str(), FILE_WRITE);
     if (file) {
-        serializeJson(doc, file);
+        file.print(doc.dump().c_str());
+        Serial.printf("saving.. %s \n", doc.dump().c_str());
         file.close();
     }
 }
-
 
 void BleLock::resumeAdvertising() {
     BLEAdvertising *pAdvertising = pServer->getAdvertising();
@@ -214,7 +281,6 @@ void BleLock::resumeAdvertising() {
 
 void BleLock::stopService() {
     if (xSemaphoreTake(bleMutex, portMAX_DELAY) == pdTRUE) {
-        pService->stop();
         xSemaphoreGive(bleMutex);
     }
 }
@@ -229,55 +295,80 @@ void BleLock::startService() {
     }
 }
 
-
-
-
-[[noreturn]] void BleLock::characteristicCreationTask(void *pvParameter) {
+void BleLock::characteristicCreationTask(void *pvParameter) {
     auto *bleLock = static_cast<BleLock *>(pvParameter);
     std::string *uuid;
+
     while (true) {
+        Serial.println("Waiting to receive UUID from queue...");
+
         if (xQueueReceive(bleLock->characteristicCreationQueue, &uuid, portMAX_DELAY) == pdTRUE) {
+            Serial.printf("BleLock::characteristicCreationTask uuid to create: %s\n", uuid->c_str());
+
             bleLock->stopService();
-            Serial.printf(" BleLock::characteristicCreationTask uuid to create: %s \n", uuid->c_str());
+            Serial.println(" - stopService");
+
             BLECharacteristic *newCharacteristic = bleLock->pService->createCharacteristic(
                     BLEUUID::fromString(*uuid),
-                    BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE |
-                    BLECharacteristic::PROPERTY_NOTIFY
+                    NIMBLE_PROPERTY::NOTIFY | NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE
             );
-            Serial.printf(" - createCharacteristic \n");
+            Serial.println(" - createCharacteristic");
+
             newCharacteristic->setCallbacks(new UniqueCharacteristicCallbacks(bleLock, *uuid));
-            Serial.printf(" - setCallbacks \n");
-            bleLock->uniqueCharacteristics[std::string (*uuid)] = newCharacteristic;
-            bleLock->confirmedCharacteristics[std::string (*uuid)] = false;
+            Serial.println(" - setCallbacks");
+
+            bleLock->uniqueCharacteristics[*uuid] = newCharacteristic;
+            bleLock->confirmedCharacteristics[*uuid] = false;
 
             delete uuid;  // Free the allocated memory
+            Serial.println(" - uuid memory freed");
 
             bleLock->saveCharacteristicsToMemory();
-            Serial.printf(" - saveCharacteristicsToMemory \n");
+            Serial.println(" - saveCharacteristicsToMemory");
+
             bleLock->startService();
-            Serial.printf(" - startService \n");
-            Serial.flush();
+            Serial.println(" - startService");
         }
     }
 }
+
 
 [[noreturn]] void BleLock::outgoingMessageTask(void *pvParameter) {
     auto *bleLock = static_cast<BleLock *>(pvParameter);
     MessageBase *responseMessage;
+
+    Serial.println("Starting outgoingMessageTask...");
+
     while (true) {
+        Serial.println("Waiting to receive message from queue...");
+
         if (xQueueReceive(bleLock->outgoingQueue, &responseMessage, portMAX_DELAY) == pdTRUE) {
-            Serial.printf("BleLock::responseMessageTask msg: %s %s \n", responseMessage->destinationAddress.c_str(),
+            Serial.println("Message received from queue");
+
+            Serial.printf("BleLock::responseMessageTask msg: %s %s\n", responseMessage->destinationAddress.c_str(),
                           responseMessage->type.c_str());
-            if (bleLock->uniqueCharacteristics.find(responseMessage->destinationAddress) != bleLock->uniqueCharacteristics.end()) {
+
+            if (bleLock->uniqueCharacteristics.find(responseMessage->destinationAddress) !=
+                bleLock->uniqueCharacteristics.end()) {
+                Serial.printf("Destination address found in uniqueCharacteristics %s \n", responseMessage->destinationAddress.c_str());
+
                 BLECharacteristic *characteristic = bleLock->uniqueCharacteristics[responseMessage->destinationAddress.c_str()];
                 characteristic->setValue(responseMessage->serialize().c_str());
+                Serial.println("Characteristic value set");
+
                 characteristic->notify();
+                Serial.println("Characteristic notified");
+            } else {
+                Serial.println("Destination address not found in uniqueCharacteristics");
             }
+
             delete responseMessage;
+            Serial.println("Response message deleted");
+
             bleLock->resumeAdvertising();
-            Serial.print("free memory: ");
-            Serial.println(ESP.getFreeHeap());  // Вывод свободной памяти
+            Serial.println("Advertising resumed");
+        } else {
+            Serial.println("Failed to receive message from queue");
         }
     }
 }
-

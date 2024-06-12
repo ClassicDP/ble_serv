@@ -1,103 +1,82 @@
-#ifndef BLELOCK_H
-#define BLELOCK_H
+#ifndef BLE_LOCK_H
+#define BLE_LOCK_H
 
-#include <Arduino.h>
-#include <BLEDevice.h>
-#include <BLEServer.h>
-#include <ArduinoJson.h>
-#include <esp_system.h>
-#include <SPIFFS.h>
-#include <map>
 #include <string>
-#include <utility>
-#include <freertos/FreeRTOS.h>
-#include <freertos/queue.h>
-#include <freertos/task.h>
-#include <set>
+#include <unordered_map>
+#include <unordered_set>
+#include <NimBLEDevice.h>
+#include <json.hpp>
+#include <SPIFFS.h>
 #include "MessageBase.h"
 
-class BleLock;
-
-class PublicCharacteristicCallbacks : public BLECharacteristicCallbacks {
-public:
-    explicit PublicCharacteristicCallbacks(BleLock* lock);
-    void onRead(BLECharacteristic* pCharacteristic) override;
-
-private:
-    BleLock* lock;
-};
-
-class UniqueCharacteristicCallbacks : public BLECharacteristicCallbacks {
-public:
-    UniqueCharacteristicCallbacks(BleLock* lock, std::string uuid);
-    void onWrite(BLECharacteristic* pCharacteristic) override;
-    void onRead(BLECharacteristic* pCharacteristic) override;
-
-private:
-    BleLock* lock;
-    std::string uuid;
-};
-
-class ServerCallbacks : public BLEServerCallbacks {
-public:
-    explicit ServerCallbacks(BleLock* lock);
-    void onConnect(BLEServer* pServer) override;
-    void onDisconnect(BLEServer* pServer) override;
-
-private:
-    BleLock* lock;
-};
-
-struct ResponseMessage {
-    std::string uuid;
-    std::string message;
-};
-
-struct Command {
-    std::string message;
-};
+using json = nlohmann::json;
 
 class BleLock {
 public:
     explicit BleLock(std::string lockName);
     void setup();
     QueueHandle_t getOutgoingQueueHandle();
-
-    [[noreturn]] static void characteristicCreationTask(void* pvParameter);
-
-    [[noreturn]] static void outgoingMessageTask(void* pvParameter);
-    std::set<std::string> awaitingKeys;
-    SemaphoreHandle_t bleMutex;  // Mutex for thread-safe operations
-
-private:
-    BLEServer* pServer;
-    BLEService* pService;
-    BLECharacteristic* pPublicCharacteristic;
-    std::string generateUUID();
-
-    void handlePublicCharacteristicRead(BLECharacteristic* pCharacteristic);
-    std::string lockName;
-    std::map<std::string, BLECharacteristic*> uniqueCharacteristics;
-    std::map<std::string, bool> confirmedCharacteristics;
-    std::string memoryFilename;
-    uint16_t autoincrement;
-    QueueHandle_t characteristicCreationQueue;
-    QueueHandle_t outgoingQueue, responseQueue;
-
-
-
-    void loadCharacteristicsFromMemory();
-    void saveCharacteristicsToMemory();
+    void handlePublicCharacteristicRead(BLECharacteristic *pCharacteristic);
     void resumeAdvertising();
     void stopService();
     void startService();
-
+    std::string generateUUID();
+    void saveCharacteristicsToMemory();
+    void loadCharacteristicsFromMemory();
     void initializeMutex();
-    friend class PublicCharacteristicCallbacks;
-    friend class UniqueCharacteristicCallbacks;
-    friend class ServerCallbacks;
 
-    MessageBase *request(MessageBase *requestMessage, const std::string &destAddr, uint32_t timeout);
+    QueueHandle_t outgoingQueue;
+    QueueHandle_t responseQueue;
+    QueueHandle_t characteristicCreationQueue;
+    std::unordered_map<std::string, BLECharacteristic *> uniqueCharacteristics;
+    std::unordered_map<std::string, bool> confirmedCharacteristics;
+    std::unordered_set<std::string> awaitingKeys;
+    std::string memoryFilename;
+    uint32_t autoincrement;
+    std::string lockName;
+    SemaphoreHandle_t bleMutex;
+    BLEServer *pServer;
+    BLEService *pService;
+    BLECharacteristic *pPublicCharacteristic;
+
+private:
+    static void characteristicCreationTask(void *pvParameter);
+
+    [[noreturn]] static void outgoingMessageTask(void *pvParameter);
+
+    MessageBase *request(MessageBase *requestMessage, const std::string &destAddr, uint32_t timeout) const;
+
+    QueueHandle_t getOutgoingQueueHandle() const;
 };
 
-#endif // BLELOCK_H
+class PublicCharacteristicCallbacks : public BLECharacteristicCallbacks {
+public:
+    explicit PublicCharacteristicCallbacks(BleLock *lock);
+    void onRead(BLECharacteristic *pCharacteristic) override;
+
+private:
+    BleLock *lock;
+};
+
+class UniqueCharacteristicCallbacks : public BLECharacteristicCallbacks {
+public:
+    UniqueCharacteristicCallbacks(BleLock *lock, std::string uuid);
+    void onWrite(BLECharacteristic *pCharacteristic) override;
+    void onRead(BLECharacteristic *pCharacteristic) override;
+
+private:
+    BleLock *lock;
+    std::string uuid;
+};
+
+class ServerCallbacks : public BLEServerCallbacks {
+public:
+    explicit ServerCallbacks(BleLock *lock);
+    void onConnect(BLEServer *pServer) override;
+    void onDisconnect(BLEServer *pServer) override;
+
+private:
+    BleLock *lock;
+};
+
+#endif // BLE_LOCK_H

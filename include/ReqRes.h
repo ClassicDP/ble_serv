@@ -14,12 +14,12 @@ public:
     }
 
 protected:
-    void serializeExtraFields(JsonDocument &doc) const override {
+    void serializeExtraFields(json &doc) override {
         doc["status"] = status;
     }
 
-    void deserializeExtraFields(const JsonDocument &doc) override {
-        status = doc["status"].as<bool>();
+    void deserializeExtraFields(const json &doc)  {
+        status = doc["status"];
     }
 };
 
@@ -48,12 +48,12 @@ public:
 
 
 protected:
-    void serializeExtraFields(JsonDocument &doc) const override {
+    void serializeExtraFields(json &doc) override {
         doc["key"] = key;
     }
 
-    void deserializeExtraFields(const JsonDocument &doc) override {
-        key = doc["key"].as<std::string>();
+    void deserializeExtraFields(const json &doc) override {
+        key = doc["key"];
     }
 
 };

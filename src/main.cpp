@@ -11,7 +11,8 @@ BleLock lock("BleLock");
 
 void setup() {
     Serial.begin(115200);
-
+    delay(3000);
+    Serial.println("Start setup");
 
     // Регистрация конструктора
     bool registerResOk = []() {

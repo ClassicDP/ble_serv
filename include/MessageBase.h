@@ -1,20 +1,22 @@
 #ifndef MESSAGEBASE_H
 #define MESSAGEBASE_H
-#include <ArduinoJson.h>
 #include <unordered_map>
 #include <functional>
 #include <string>
+#include "json.hpp"
+
+using json = nlohmann::json;
 
 class MessageBase {
 public:
-    std::string sourceAddress;
-    std::string destinationAddress;
     std::string type;
 
+    std::string sourceAddress;
+
+    std::string destinationAddress;
     MessageBase() = default;
 
-    virtual String serialize() const;
-    virtual void deserialize(const String& input);
+    virtual std::string serialize() const;
     virtual MessageBase* processRequest(void* context) { return nullptr; } // Виртуальный метод обработки запроса
     virtual ~MessageBase() = default;
 
@@ -23,11 +25,12 @@ public:
     static MessageBase* createInstance(const std::string& input);
 
 protected:
-    virtual void serializeExtraFields(JsonDocument& doc) const = 0;
-    virtual void deserializeExtraFields(const JsonDocument& doc) = 0;
+    virtual void serializeExtraFields(json& doc)=0;
+    virtual void deserializeExtraFields(const json &)=0;
 
 private:
     static std::unordered_map<std::string, Constructor> constructors;
+    void deserialize(const std::string &input);
 };
 
 #endif
