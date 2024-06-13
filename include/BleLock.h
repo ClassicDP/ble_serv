@@ -40,7 +40,7 @@ public:
     BLECharacteristic *pPublicCharacteristic;
 
 private:
-    static void characteristicCreationTask(void *pvParameter);
+    [[noreturn]] [[noreturn]] static void characteristicCreationTask(void *pvParameter);
 
     [[noreturn]] static void outgoingMessageTask(void *pvParameter);
 

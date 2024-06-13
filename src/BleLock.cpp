@@ -5,6 +5,7 @@
 PublicCharacteristicCallbacks::PublicCharacteristicCallbacks(BleLock *lock) : lock(lock) {}
 
 void PublicCharacteristicCallbacks::onRead(BLECharacteristic *pCharacteristic) {
+    Serial.println("PublicCharacteristicCallbacks::onRead called");
     lock->handlePublicCharacteristicRead(pCharacteristic);
 }
 
@@ -12,12 +13,15 @@ UniqueCharacteristicCallbacks::UniqueCharacteristicCallbacks(BleLock *lock, std:
         : lock(lock), uuid(std::move(uuid)) {}
 
 void UniqueCharacteristicCallbacks::onWrite(BLECharacteristic *pCharacteristic) {
+    Serial.println("UniqueCharacteristicCallbacks::onWrite called");
     if (!lock->confirmedCharacteristics[uuid]) {
         lock->confirmedCharacteristics[uuid] = true;
         lock->saveCharacteristicsToMemory();
     }
 
     std::string receivedMessage = pCharacteristic->getValue();
+    Serial.printf("Received message: %s\n", receivedMessage.c_str());
+
     auto msg = MessageBase::createInstance(receivedMessage);
     if (msg) {
         msg->sourceAddress = uuid;
@@ -64,7 +68,7 @@ MessageBase *BleLock::request(MessageBase *requestMessage, const std::string &de
 }
 
 void UniqueCharacteristicCallbacks::onRead(BLECharacteristic *pCharacteristic) {
-    Serial.println("UniqueCharacteristicCallbacks::onRead");
+    Serial.println("UniqueCharacteristicCallbacks::onRead called");
     BLECharacteristicCallbacks::onRead(pCharacteristic);
 }
 
@@ -84,7 +88,7 @@ BleLock::BleLock(std::string lockName)
           autoincrement(0) {
     memoryFilename = "/ble_lock_memory.json";
     Serial.println("xQueueCreate ");
-    characteristicCreationQueue = xQueueCreate(10, sizeof(std::string *));
+    characteristicCreationQueue = xQueueCreate(10, sizeof(char*)); // Queue to hold char* pointers
     outgoingQueue = xQueueCreate(10, sizeof(MessageBase *));
     responseQueue = xQueueCreate(10, sizeof(std::string *));
     Serial.println("initializeMutex ");
@@ -114,9 +118,6 @@ void BleLock::setup() {
         return;
     }
     Serial.println("Service created");
-
-    loadCharacteristicsFromMemory();
-    Serial.println("loadCharacteristicsFromMemory completed");
 
     pPublicCharacteristic = pService->createCharacteristic(
             BLEUUID((uint16_t)0x1234), // Example UUID
@@ -150,9 +151,6 @@ void BleLock::setup() {
     Serial.println("OutgoingMessageTask created");
 }
 
-
-
-
 QueueHandle_t BleLock::getOutgoingQueueHandle() const {
     return outgoingQueue;
 }
@@ -166,17 +164,30 @@ void BleLock::initializeMutex() {
 
 std::string BleLock::generateUUID() {
     char uuid[37];
-    sprintf(uuid, "%08x-%04x-%04x-%04x-%012x",
-            esp_random(), autoincrement++ & 0xFFFF, (esp_random() & 0x0FFF) | 0x4000,
-            (esp_random() & 0x3FFF) | 0x8000, esp_random());
+    snprintf(uuid, sizeof(uuid),
+             "%08x-%04x-%04x-%04x-%012x",
+             esp_random(),
+             (autoincrement++ & 0xFFFF),
+             (esp_random() & 0x0FFF) | 0x4000,
+             (esp_random() & 0x3FFF) | 0x8000,
+             esp_random());
     saveCharacteristicsToMemory();
     return {uuid};
 }
 
 void BleLock::handlePublicCharacteristicRead(BLECharacteristic *pCharacteristic) {
     std::string newUUID = generateUUID();
-    auto *uuid = new std::string(newUUID);
-    xQueueSend(characteristicCreationQueue, &uuid, portMAX_DELAY);
+    Serial.printf("Generated new UUID: %s\n", newUUID.c_str());
+
+    // Allocate memory for the UUID and copy the string
+    char *uuidBuffer = new char[newUUID.length() + 1];
+    strcpy(uuidBuffer, newUUID.c_str());
+
+    if (xQueueSend(characteristicCreationQueue, &uuidBuffer, portMAX_DELAY) != pdPASS) {
+        Serial.println("Failed to send UUID to characteristicCreationQueue");
+        delete[] uuidBuffer; // Ensure memory is freed if sending fails
+    }
+
     pCharacteristic->setValue(newUUID);
 }
 
@@ -247,9 +258,6 @@ void BleLock::loadCharacteristicsFromMemory() {
     }
 }
 
-
-
-
 void BleLock::saveCharacteristicsToMemory() {
     json doc;
     doc["autoincrement"] = autoincrement;
@@ -295,43 +303,45 @@ void BleLock::startService() {
     }
 }
 
-void BleLock::characteristicCreationTask(void *pvParameter) {
+[[noreturn]] void BleLock::characteristicCreationTask(void *pvParameter) {
     auto *bleLock = static_cast<BleLock *>(pvParameter);
-    std::string *uuid;
+    char *uuid;
 
     while (true) {
         Serial.println("Waiting to receive UUID from queue...");
 
         if (xQueueReceive(bleLock->characteristicCreationQueue, &uuid, portMAX_DELAY) == pdTRUE) {
-            Serial.printf("BleLock::characteristicCreationTask uuid to create: %s\n", uuid->c_str());
+            // Convert received char* to std::string
+            std::string uuidStr(uuid);
+            Serial.printf("BleLock::characteristicCreationTask uuid to create: %s\n", uuidStr.c_str());
 
             bleLock->stopService();
             Serial.println(" - stopService");
 
             BLECharacteristic *newCharacteristic = bleLock->pService->createCharacteristic(
-                    BLEUUID::fromString(*uuid),
+                    NimBLEUUID::fromString(uuidStr),
                     NIMBLE_PROPERTY::NOTIFY | NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE
             );
             Serial.println(" - createCharacteristic");
 
-            newCharacteristic->setCallbacks(new UniqueCharacteristicCallbacks(bleLock, *uuid));
+            newCharacteristic->setCallbacks(new UniqueCharacteristicCallbacks(bleLock, uuidStr));
             Serial.println(" - setCallbacks");
 
-            bleLock->uniqueCharacteristics[*uuid] = newCharacteristic;
-            bleLock->confirmedCharacteristics[*uuid] = false;
+            bleLock->uniqueCharacteristics[uuidStr] = newCharacteristic;
+            bleLock->confirmedCharacteristics[uuidStr] = false;
 
-            delete uuid;  // Free the allocated memory
+            // Free the allocated memory
+            delete[] uuid;
             Serial.println(" - uuid memory freed");
 
             bleLock->saveCharacteristicsToMemory();
             Serial.println(" - saveCharacteristicsToMemory");
 
-            bleLock->startService();
-            Serial.println(" - startService");
+            bleLock->resumeAdvertising();
+            Serial.println(" - resumeAdvertising");
         }
     }
 }
-
 
 [[noreturn]] void BleLock::outgoingMessageTask(void *pvParameter) {
     auto *bleLock = static_cast<BleLock *>(pvParameter);
