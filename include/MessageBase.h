@@ -31,6 +31,7 @@ protected:
 private:
     static std::unordered_map<std::string, Constructor> constructors;
     void deserialize(const std::string& input);
+
 };
 
 #endif // MESSAGEBASE_H
