@@ -279,36 +279,52 @@ void BleLock::saveCharacteristicsToMemory() {
 }
 
 void BleLock::resumeAdvertising() {
+    Serial.println("Attempting to resume advertising...");
     BLEAdvertising *pAdvertising = pServer->getAdvertising();
     if (xSemaphoreTake(bleMutex, portMAX_DELAY) == pdTRUE) {
+        Serial.println("Mutex acquired, resuming advertising...");
         pAdvertising->start();
         xSemaphoreGive(bleMutex);
+        Serial.println("Mutex released, advertising resumed");
+    } else {
+        Serial.println("Failed to acquire mutex for advertising");
     }
-    Serial.println("Advertising resumed");
 }
 
+
 void BleLock::stopService() {
+    Serial.println("Attempting to stop service...");
     if (xSemaphoreTake(bleMutex, portMAX_DELAY) == pdTRUE) {
+        pService->dump();
+        Serial.println("Service stopped");
         xSemaphoreGive(bleMutex);
+        Serial.println("Mutex released after stopping service");
+    } else {
+        Serial.println("Failed to acquire mutex to stop service");
     }
 }
 
 void BleLock::startService() {
+    Serial.println("Attempting to start service...");
     if (xSemaphoreTake(bleMutex, portMAX_DELAY) == pdTRUE) {
         pService->start();
         BLEAdvertising *pAdvertising = pServer->getAdvertising();
         pAdvertising->start();
-        Serial.println("Service restarted and advertising resumed");
+        Serial.println("Service started and advertising resumed");
         xSemaphoreGive(bleMutex);
+        Serial.println("Mutex released after starting service");
+    } else {
+        Serial.println("Failed to acquire mutex to start service");
     }
 }
+
 
 [[noreturn]] void BleLock::characteristicCreationTask(void *pvParameter) {
     auto *bleLock = static_cast<BleLock *>(pvParameter);
     char *uuid;
 
     while (true) {
-        Serial.println("Waiting to receive UUID from queue...");
+        Serial.println("characteristicCreationTask: Waiting to receive UUID from queue...");
 
         if (xQueueReceive(bleLock->characteristicCreationQueue, &uuid, portMAX_DELAY) == pdTRUE) {
             // Convert received char* to std::string
@@ -350,7 +366,7 @@ void BleLock::startService() {
     Serial.println("Starting outgoingMessageTask...");
 
     while (true) {
-        Serial.println("Waiting to receive message from queue...");
+        Serial.println("outgoingMessageTask: Waiting to receive message from queue...");
 
         if (xQueueReceive(bleLock->outgoingQueue, &responseMessage, portMAX_DELAY) == pdTRUE) {
             Serial.println("Message received from queue");
