@@ -16,10 +16,12 @@ public:
 protected:
     void serializeExtraFields(json &doc) override {
         doc["status"] = status;
+        Serial.printf("Serialized status: %d\n", status);
     }
 
-    void deserializeExtraFields(const json &doc)  {
+    void deserializeExtraFields(const json &doc) override {
         status = doc["status"];
+        Serial.printf("Deserialized status: %d\n", status);
     }
 };
 
@@ -33,9 +35,8 @@ public:
         type = "reqRegKey";
     }
 
-
     MessageBase *processRequest(void *context) override {
-        auto lock = static_cast<BleLock *>( context);
+        auto lock = static_cast<BleLock *>(context);
         if (xSemaphoreTake(lock->bleMutex, portMAX_DELAY) == pdTRUE) {
             lock->awaitingKeys.insert(key);
             xSemaphoreGive(lock->bleMutex);
@@ -46,18 +47,14 @@ public:
         return res;
     }
 
-
 protected:
     void serializeExtraFields(json &doc) override {
         doc["key"] = key;
+        Serial.printf("Serialized key: %s\n", key.c_str());
     }
 
     void deserializeExtraFields(const json &doc) override {
         key = doc["key"];
+        Serial.printf("Deserialized key: %s\n", key.c_str());
     }
-
 };
-
-
-
-

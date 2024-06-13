@@ -348,12 +348,15 @@ void BleLock::characteristicCreationTask(void *pvParameter) {
             Serial.printf("BleLock::responseMessageTask msg: %s %s\n", responseMessage->destinationAddress.c_str(),
                           responseMessage->type.c_str());
 
-            if (bleLock->uniqueCharacteristics.find(responseMessage->destinationAddress) !=
-                bleLock->uniqueCharacteristics.end()) {
-                Serial.printf("Destination address found in uniqueCharacteristics %s \n", responseMessage->destinationAddress.c_str());
+            auto it = bleLock->uniqueCharacteristics.find(responseMessage->destinationAddress);
+            if (it != bleLock->uniqueCharacteristics.end()) {
+                Serial.printf("Destination address found in uniqueCharacteristics %s\n", responseMessage->destinationAddress.c_str());
 
-                BLECharacteristic *characteristic = bleLock->uniqueCharacteristics[responseMessage->destinationAddress.c_str()];
-                characteristic->setValue(responseMessage->serialize().c_str());
+                BLECharacteristic *characteristic = it->second;
+                std::string serializedMessage = responseMessage->serialize();
+                Serial.printf("Serialized message: %s\n", serializedMessage.c_str());
+
+                characteristic->setValue(serializedMessage);
                 Serial.println("Characteristic value set");
 
                 characteristic->notify();
