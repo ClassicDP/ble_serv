@@ -9,6 +9,7 @@ void MessageBase::registerConstructor(const std::string& type, Constructor const
 }
 
 MessageBase* MessageBase::createInstance(const std::string& input) {
+    Serial.println("Try parsing");
     try {
         json doc = json::parse(input);
 

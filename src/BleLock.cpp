@@ -4,7 +4,7 @@
 // Callbacks Implementation
 PublicCharacteristicCallbacks::PublicCharacteristicCallbacks(BleLock *lock) : lock(lock) {}
 
-void PublicCharacteristicCallbacks::onRead(BLECharacteristic *pCharacteristic) {
+void PublicCharacteristicCallbacks::onRead(NimBLECharacteristic *pCharacteristic) {
     Serial.println("PublicCharacteristicCallbacks::onRead called");
     lock->handlePublicCharacteristicRead(pCharacteristic);
 }
@@ -12,12 +12,8 @@ void PublicCharacteristicCallbacks::onRead(BLECharacteristic *pCharacteristic) {
 UniqueCharacteristicCallbacks::UniqueCharacteristicCallbacks(BleLock *lock, std::string uuid)
         : lock(lock), uuid(std::move(uuid)) {}
 
-void UniqueCharacteristicCallbacks::onWrite(BLECharacteristic *pCharacteristic) {
+void UniqueCharacteristicCallbacks::onWrite(NimBLECharacteristic *pCharacteristic) {
     Serial.println("UniqueCharacteristicCallbacks::onWrite called");
-    if (!lock->confirmedCharacteristics[uuid]) {
-        lock->confirmedCharacteristics[uuid] = true;
-        lock->saveCharacteristicsToMemory();
-    }
 
     std::string receivedMessage = pCharacteristic->getValue();
     Serial.printf("Received message: %s\n", receivedMessage.c_str());
@@ -67,18 +63,18 @@ MessageBase *BleLock::request(MessageBase *requestMessage, const std::string &de
     return nullptr;
 }
 
-void UniqueCharacteristicCallbacks::onRead(BLECharacteristic *pCharacteristic) {
+void UniqueCharacteristicCallbacks::onRead(NimBLECharacteristic *pCharacteristic) {
     Serial.println("UniqueCharacteristicCallbacks::onRead called");
-    BLECharacteristicCallbacks::onRead(pCharacteristic);
+    NimBLECharacteristicCallbacks::onRead(pCharacteristic);
 }
 
 ServerCallbacks::ServerCallbacks(BleLock *lock) : lock(lock) {}
 
-void ServerCallbacks::onConnect(BLEServer *pServer) {
+void ServerCallbacks::onConnect(NimBLEServer *pServer) {
     Serial.println("Device connected");
 }
 
-void ServerCallbacks::onDisconnect(BLEServer *pServer) {
+void ServerCallbacks::onDisconnect(NimBLEServer *pServer) {
     Serial.println("Device disconnected");
     lock->resumeAdvertising();
 }
@@ -88,7 +84,7 @@ BleLock::BleLock(std::string lockName)
           autoincrement(0) {
     memoryFilename = "/ble_lock_memory.json";
     Serial.println("xQueueCreate ");
-    characteristicCreationQueue = xQueueCreate(10, sizeof(char*)); // Queue to hold char* pointers
+    characteristicCreationQueue = xQueueCreate(10, sizeof(char *)); // Queue to hold char* pointers
     outgoingQueue = xQueueCreate(10, sizeof(MessageBase *));
     responseQueue = xQueueCreate(10, sizeof(std::string *));
     Serial.println("initializeMutex ");
@@ -112,7 +108,7 @@ void BleLock::setup() {
     pServer->setCallbacks(new ServerCallbacks(this));
     Serial.println("Server callbacks set");
 
-    pService = pServer->createService(BLEUUID((uint16_t)0xABCD));
+    pService = pServer->createService(BLEUUID((uint16_t) 0xABCD));
     if (!pService) {
         Serial.println("Failed to create service");
         return;
@@ -120,7 +116,7 @@ void BleLock::setup() {
     Serial.println("Service created");
 
     pPublicCharacteristic = pService->createCharacteristic(
-            BLEUUID((uint16_t)0x1234), // Example UUID
+            BLEUUID((uint16_t) 0x1234), // Example UUID
             NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE
     );
     if (!pPublicCharacteristic) {
@@ -175,7 +171,7 @@ std::string BleLock::generateUUID() {
     return {uuid};
 }
 
-void BleLock::handlePublicCharacteristicRead(BLECharacteristic *pCharacteristic) {
+void BleLock::handlePublicCharacteristicRead(NimBLECharacteristic *pCharacteristic) {
     std::string newUUID = generateUUID();
     Serial.printf("Generated new UUID: %s\n", newUUID.c_str());
 
@@ -223,8 +219,8 @@ void BleLock::loadCharacteristicsFromMemory() {
                     continue;
                 }
 
-                BLECharacteristic *characteristic = pService->createCharacteristic(
-                        BLEUUID::fromString(uuid),
+                NimBLECharacteristic *characteristic = pService->createCharacteristic(
+                        NimBLEUUID::fromString(uuid),
                         NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY
                 );
 
@@ -280,43 +276,26 @@ void BleLock::saveCharacteristicsToMemory() {
 
 void BleLock::resumeAdvertising() {
     Serial.println("Attempting to resume advertising...");
-    BLEAdvertising *pAdvertising = pServer->getAdvertising();
-    if (xSemaphoreTake(bleMutex, portMAX_DELAY) == pdTRUE) {
-        Serial.println("Mutex acquired, resuming advertising...");
-        pAdvertising->start();
-        xSemaphoreGive(bleMutex);
-        Serial.println("Mutex released, advertising resumed");
-    } else {
-        Serial.println("Failed to acquire mutex for advertising");
-    }
+    NimBLEAdvertising *pAdvertising = pServer->getAdvertising();
+    pAdvertising->start();
+    Serial.println("Advertising resumed");
 }
 
-
 void BleLock::stopService() {
-    Serial.println("Attempting to stop service...");
-    if (xSemaphoreTake(bleMutex, portMAX_DELAY) == pdTRUE) {
-        pService->dump();
-        Serial.println("Service stopped");
-        xSemaphoreGive(bleMutex);
-        Serial.println("Mutex released after stopping service");
-    } else {
-        Serial.println("Failed to acquire mutex to stop service");
-    }
+    Serial.println("Attempting to stop Advertising...");
+    pServer->stopAdvertising();
+    Serial.println("Advertising stopped");
 }
 
 void BleLock::startService() {
     Serial.println("Attempting to start service...");
-    if (xSemaphoreTake(bleMutex, portMAX_DELAY) == pdTRUE) {
-        pService->start();
-        BLEAdvertising *pAdvertising = pServer->getAdvertising();
-        pAdvertising->start();
-        Serial.println("Service started and advertising resumed");
-        xSemaphoreGive(bleMutex);
-        Serial.println("Mutex released after starting service");
-    } else {
-        Serial.println("Failed to acquire mutex to start service");
-    }
+    pService->start();
+    NimBLEAdvertising *pAdvertising = pServer->getAdvertising();
+    Serial.println("Attempting to start Advertising...");
+    pAdvertising->start();
+    Serial.println("Each started");
 }
+
 
 
 [[noreturn]] void BleLock::characteristicCreationTask(void *pvParameter) {
@@ -331,10 +310,15 @@ void BleLock::startService() {
             std::string uuidStr(uuid);
             Serial.printf("BleLock::characteristicCreationTask uuid to create: %s\n", uuidStr.c_str());
 
-            bleLock->stopService();
-            Serial.println(" - stopService");
+            // Lock the mutex for service operations
+            Serial.println("characteristicCreationTask: Waiting for Mutex");
+            xSemaphoreTake(bleLock->bleMutex, portMAX_DELAY);
+            Serial.println("characteristicCreationTask: Mutex lock");
 
-            BLECharacteristic *newCharacteristic = bleLock->pService->createCharacteristic(
+//            bleLock->stopService();
+//            Serial.println(" - stopService");
+
+            NimBLECharacteristic *newCharacteristic = bleLock->pService->createCharacteristic(
                     NimBLEUUID::fromString(uuidStr),
                     NIMBLE_PROPERTY::NOTIFY | NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE
             );
@@ -355,6 +339,11 @@ void BleLock::startService() {
 
             bleLock->resumeAdvertising();
             Serial.println(" - resumeAdvertising");
+
+            // Unlock the mutex for service operations
+            xSemaphoreGive(bleLock->bleMutex);
+            Serial.println("characteristicCreationTask: Mutex unlock");
+
         }
     }
 }
@@ -374,11 +363,17 @@ void BleLock::startService() {
             Serial.printf("BleLock::responseMessageTask msg: %s %s\n", responseMessage->destinationAddress.c_str(),
                           responseMessage->type.c_str());
 
+            // Lock the mutex for advertising and characteristic operations
+            Serial.println("outgoingMessageTask: Waiting for Mutex");
+            xSemaphoreTake(bleLock->bleMutex, portMAX_DELAY);
+            Serial.println("outgoingMessageTask: Mutex lock");
+
             auto it = bleLock->uniqueCharacteristics.find(responseMessage->destinationAddress);
             if (it != bleLock->uniqueCharacteristics.end()) {
-                Serial.printf("Destination address found in uniqueCharacteristics %s\n", responseMessage->destinationAddress.c_str());
+                Serial.printf("Destination address found in uniqueCharacteristics %s\n",
+                              responseMessage->destinationAddress.c_str());
 
-                BLECharacteristic *characteristic = it->second;
+                NimBLECharacteristic *characteristic = it->second;
                 std::string serializedMessage = responseMessage->serialize();
                 Serial.printf("Serialized message: %s\n", serializedMessage.c_str());
 
@@ -396,6 +391,10 @@ void BleLock::startService() {
 
             bleLock->resumeAdvertising();
             Serial.println("Advertising resumed");
+
+            // Unlock the mutex for advertising and characteristic operations
+            xSemaphoreGive(bleLock->bleMutex);
+            Serial.println("outgoingMessageTask: Mutex unlock");
         } else {
             Serial.println("Failed to receive message from queue");
         }
