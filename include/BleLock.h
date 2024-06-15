@@ -39,14 +39,18 @@ public:
     BLEService *pService;
     BLECharacteristic *pPublicCharacteristic;
 
+    QueueHandle_t jsonParsingQueue;
 private:
     [[noreturn]] [[noreturn]] static void characteristicCreationTask(void *pvParameter);
 
     [[noreturn]] static void outgoingMessageTask(void *pvParameter);
 
+    [[noreturn]] static void jsonParsingTask(void *pvParameter);
+
     MessageBase *request(MessageBase *requestMessage, const std::string &destAddr, uint32_t timeout) const;
 
     QueueHandle_t getOutgoingQueueHandle() const;
+
 };
 
 class PublicCharacteristicCallbacks : public BLECharacteristicCallbacks {

@@ -18,32 +18,16 @@ void UniqueCharacteristicCallbacks::onWrite(NimBLECharacteristic *pCharacteristi
     std::string receivedMessage = pCharacteristic->getValue();
     Serial.printf("Received message: %s\n", receivedMessage.c_str());
 
-    auto msg = MessageBase::createInstance(receivedMessage);
-    if (msg) {
-        msg->sourceAddress = uuid;
-        Serial.printf("Received request from: %s with type: %s\n", msg->sourceAddress.c_str(), msg->type.c_str());
+    // Allocate memory for the received message and copy the string
+    auto *receivedMessageStr = new std::string(receivedMessage);
 
-        MessageBase *responseMessage = msg->processRequest(lock);
-        delete msg;
-
-        if (responseMessage) {
-            Serial.println("Sending response message to outgoing queue");
-            if (xQueueSend(lock->outgoingQueue, &responseMessage, portMAX_DELAY) != pdPASS) {
-                Serial.println("Failed to send response message to outgoing queue");
-                delete responseMessage;
-            }
-        } else {
-            auto responseMessageStr = new std::string(receivedMessage);
-            Serial.println("Sending response message string to response queue");
-            if (xQueueSend(lock->responseQueue, &responseMessageStr, portMAX_DELAY) != pdPASS) {
-                Serial.println("Failed to send response message string to response queue");
-                delete responseMessageStr;
-            }
-        }
-    } else {
-        Serial.println("Failed to create message instance");
+    // Send the message to the JSON parsing queue
+    if (xQueueSend(lock->jsonParsingQueue, &receivedMessageStr, portMAX_DELAY) != pdPASS) {
+        Serial.println("Failed to send message to JSON parsing queue");
+        delete receivedMessageStr;
     }
 }
+
 
 MessageBase *BleLock::request(MessageBase *requestMessage, const std::string &destAddr, uint32_t timeout) const {
     requestMessage->sourceAddress = "local_address";
@@ -143,8 +127,19 @@ void BleLock::setup() {
 
     xTaskCreate(characteristicCreationTask, "CharacteristicCreationTask", 8192, this, 1, nullptr);
     Serial.println("CharacteristicCreationTask created");
-    xTaskCreate(outgoingMessageTask, "OutgoingMessageTask", 4096, this, 1, nullptr);
+    xTaskCreate(outgoingMessageTask, "OutgoingMessageTask", 8192, this, 1, nullptr);
     Serial.println("OutgoingMessageTask created");
+
+    // Create the JSON parsing queue
+    jsonParsingQueue = xQueueCreate(10, sizeof(std::string*));
+    if (jsonParsingQueue == nullptr) {
+        Serial.println("Failed to create JSON parsing queue");
+        return;
+    }
+
+    // Create the JSON parsing task
+    xTaskCreate(jsonParsingTask, "JsonParsingTask", 8192, this, 1, nullptr);
+    Serial.println("JsonParsingTask created");
 }
 
 QueueHandle_t BleLock::getOutgoingQueueHandle() const {
@@ -400,3 +395,52 @@ void BleLock::startService() {
         }
     }
 }
+
+[[noreturn]] void BleLock::jsonParsingTask(void *pvParameter) {
+    auto *bleLock = static_cast<BleLock *>(pvParameter);
+    std::string *receivedMessageStr;
+
+    while (true) {
+        Serial.println("jsonParsingTask: Waiting to receive message from queue...");
+
+        if (xQueueReceive(bleLock->jsonParsingQueue, &receivedMessageStr, portMAX_DELAY) == pdTRUE) {
+            Serial.printf("jsonParsingTask: Received message: %s\n", receivedMessageStr->c_str());
+
+            try {
+                auto msg = MessageBase::createInstance(*receivedMessageStr);
+                if (msg) {
+                    msg->sourceAddress = "UUID"; // Set the UUID appropriately
+                    Serial.printf("Received request from: %s with type: %s\n", msg->sourceAddress.c_str(), msg->type.c_str());
+
+                    MessageBase *responseMessage = msg->processRequest(bleLock);
+                    delete msg;
+
+                    if (responseMessage) {
+                        Serial.println("Sending response message to outgoing queue");
+                        if (xQueueSend(bleLock->outgoingQueue, &responseMessage, portMAX_DELAY) != pdPASS) {
+                            Serial.println("Failed to send response message to outgoing queue");
+                            delete responseMessage;
+                        }
+                    } else {
+                        auto responseMessageStr = new std::string(*receivedMessageStr);
+                        Serial.println("Sending response message string to response queue");
+                        if (xQueueSend(bleLock->responseQueue, &responseMessageStr, portMAX_DELAY) != pdPASS) {
+                            Serial.println("Failed to send response message string to response queue");
+                            delete responseMessageStr;
+                        }
+                    }
+                } else {
+                    Serial.println("Failed to create message instance");
+                }
+            } catch (const json::parse_error &e) {
+                Serial.printf("JSON parse error: %s\n", e.what());
+            } catch (const std::exception &e) {
+                Serial.printf("Exception occurred: %s\n", e.what());
+            }
+
+            // Free the allocated memory for the received message
+            delete receivedMessageStr;
+        }
+    }
+}
+
