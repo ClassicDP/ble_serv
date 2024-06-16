@@ -1,12 +1,72 @@
 #include "BleLock.h"
 #include <iostream>
-#include "ArduinoLog.h"
+
 
 // Callbacks Implementation
 PublicCharacteristicCallbacks::PublicCharacteristicCallbacks(BleLock *lock) : lock(lock) {}
 
+void printCharacteristics(NimBLEService* pService) {
+    Serial.println("Listing characteristics:");
+
+    std::vector<NimBLECharacteristic*> characteristics = pService->getCharacteristics();
+    for (auto& characteristic : characteristics) {
+        Serial.print("Characteristic UUID: ");
+        Serial.println(characteristic->getUUID().toString().c_str());
+
+        Serial.print("Properties: ");
+        uint32_t properties = characteristic->getProperties();
+        if (properties & NIMBLE_PROPERTY::READ) {
+            Serial.print("READ ");
+        }
+        if (properties & NIMBLE_PROPERTY::WRITE) {
+            Serial.print("WRITE ");
+        }
+        if (properties & NIMBLE_PROPERTY::NOTIFY) {
+            Serial.print("NOTIFY ");
+        }
+        if (properties & NIMBLE_PROPERTY::INDICATE) {
+            Serial.print("INDICATE ");
+        }
+        Serial.println();
+    }
+}
+
+void logColor(LColor color, const __FlashStringHelper* format, ...) {
+    const char* colorCode;
+
+    switch (color) {
+        case LColor::Reset: colorCode = "\x1B[0m"; break;
+        case LColor::Red: colorCode = "\x1B[31m"; break;
+        case LColor::LightRed: colorCode = "\x1B[91m"; break;
+        case LColor::Yellow: colorCode = "\x1B[93m"; break;
+        case LColor::LightBlue: colorCode = "\x1B[94m"; break;
+        case LColor::Green: colorCode = "\x1B[92m"; break;
+        case LColor::LightCyan: colorCode = "\x1B[96m"; break;
+        default: colorCode = "\x1B[0m"; break;
+    }
+
+    Serial.print("\n");  // Add newline at the beginning
+    Serial.print(millis());
+    Serial.print("ms: ");
+    Serial.print(colorCode);
+
+    // Create a buffer to hold the formatted string
+    char buffer[256];
+    va_list args;
+    va_start(args, format);
+    vsnprintf_P(buffer, sizeof(buffer), reinterpret_cast<const char*>(format), args);
+    va_end(args);
+
+    Serial.print(buffer);
+    Serial.print("\x1B[0m");  // Reset color
+    Serial.println();
+}
+
+
+
+
 void PublicCharacteristicCallbacks::onRead(NimBLECharacteristic *pCharacteristic) {
-    Log.verbose(F("PublicCharacteristicCallbacks::onRead called"));
+    logColor(LColor::Green, F("PublicCharacteristicCallbacks::onRead called"));
     lock->handlePublicCharacteristicRead(pCharacteristic);
 }
 
@@ -14,7 +74,7 @@ UniqueCharacteristicCallbacks::UniqueCharacteristicCallbacks(BleLock *lock, std:
         : lock(lock), uuid(std::move(uuid)) {}
 
 void UniqueCharacteristicCallbacks::onWrite(NimBLECharacteristic *pCharacteristic) {
-    Log.verbose(F("UniqueCharacteristicCallbacks::onWrite called"));
+    logColor(LColor::Yellow, F("UniqueCharacteristicCallbacks::onWrite called"));
 
     std::string receivedMessage = pCharacteristic->getValue();
     Log.verbose(F("Received message: %s"), receivedMessage.c_str());
@@ -60,7 +120,6 @@ void ServerCallbacks::onConnect(NimBLEServer *pServer) {
 
 void ServerCallbacks::onDisconnect(NimBLEServer *pServer) {
     Log.verbose(F("Device disconnected"));
-    lock->resumeAdvertising();
 }
 
 BleLock::BleLock(std::string lockName)
@@ -68,7 +127,7 @@ BleLock::BleLock(std::string lockName)
           autoincrement(0) {
     memoryFilename = "/ble_lock_memory.json";
     Log.verbose(F("xQueueCreate "));
-    characteristicCreationQueue = xQueueCreate(10, sizeof(char *)); // Queue to hold char* pointers
+    characteristicCreationQueue = xQueueCreate(10, sizeof(CreateCharacteristicCmd *)); // Queue to hold char* pointers
     outgoingQueue = xQueueCreate(10, sizeof(MessageBase *));
     responseQueue = xQueueCreate(10, sizeof(std::string *));
     Log.verbose(F("initializeMutex "));
@@ -170,16 +229,13 @@ std::string BleLock::generateUUID() {
 void BleLock::handlePublicCharacteristicRead(NimBLECharacteristic *pCharacteristic) {
     std::string newUUID = generateUUID();
     Log.verbose(F("Generated new UUID: %s"), newUUID.c_str());
-
-    // Allocate memory for the UUID and copy the string
-    char *uuidBuffer = new char[newUUID.length() + 1];
-    strcpy(uuidBuffer, newUUID.c_str());
-
-    if (xQueueSend(characteristicCreationQueue, &uuidBuffer, portMAX_DELAY) != pdPASS) {
-        Log.error(F("Failed to send UUID to characteristicCreationQueue"));
-        delete[] uuidBuffer; // Ensure memory is freed if sending fails
-    }
     pCharacteristic->setValue(newUUID);
+    Log.verbose(F(" - resumeAdvertising"));
+    auto cmd = new CreateCharacteristicCmd{newUUID, pCharacteristic};
+    if (xQueueSend(characteristicCreationQueue, &cmd, portMAX_DELAY) != pdPASS) {
+        Log.error(F("Failed to send UUID to characteristicCreationQueue"));
+        delete cmd;
+    }
 }
 
 void BleLock::loadCharacteristicsFromMemory() {
@@ -298,29 +354,30 @@ void BleLock::startService() {
 
 [[noreturn]] void BleLock::characteristicCreationTask(void *pvParameter) {
     auto *bleLock = static_cast<BleLock *>(pvParameter);
-    char *uuid;
+    CreateCharacteristicCmd *cmd;
 
     while (true) {
-        Log.verbose(F("characteristicCreationTask: Waiting to receive UUID from queue..."));
+        logColor(LColor::Green, F("characteristicCreationTask: Waiting to receive UUID from queue..."));
 
-        if (xQueueReceive(bleLock->characteristicCreationQueue, &uuid, portMAX_DELAY) == pdTRUE) {
+        if (xQueueReceive(bleLock->characteristicCreationQueue, &cmd, portMAX_DELAY) == pdTRUE) {
             // Convert received char* to std::string
-            std::string uuidStr(uuid);
-            Log.verbose(F("BleLock::characteristicCreationTask uuid to create: %s"), uuidStr.c_str());
+            std::string uuidStr(cmd->uuid);
+            logColor(LColor::Green, F("BleLock::characteristicCreationTask uuid to create: %s"), uuidStr.c_str());
 
             // Lock the mutex for service operations
             Log.verbose(F("characteristicCreationTask: Waiting for Mutex"));
             xSemaphoreTake(bleLock->bleMutex, portMAX_DELAY);
             Log.verbose(F("characteristicCreationTask: Mutex lock"));
 
-            bleLock->stopService();
-            Log.verbose(F(" - stopService"));
+//            bleLock->stopService();
+//            Log.verbose(F(" - stopService"));
 
             NimBLECharacteristic *newCharacteristic = bleLock->pService->createCharacteristic(
                     NimBLEUUID::fromString(uuidStr),
                     NIMBLE_PROPERTY::NOTIFY | NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE
             );
             Log.verbose(F(" - createCharacteristic"));
+            printCharacteristics(bleLock->pService);
 
             newCharacteristic->setCallbacks(new UniqueCharacteristicCallbacks(bleLock, uuidStr));
             Log.verbose(F(" - setCallbacks"));
@@ -329,18 +386,16 @@ void BleLock::startService() {
             bleLock->confirmedCharacteristics[uuidStr] = false;
 
             // Free the allocated memory
-            delete[] uuid;
             Log.verbose(F(" - uuid memory freed"));
 
             bleLock->saveCharacteristicsToMemory();
             Log.verbose(F(" - saveCharacteristicsToMemory"));
 
-            bleLock->resumeAdvertising();
-            Log.verbose(F(" - resumeAdvertising"));
 
             // Unlock the mutex for service operations
             xSemaphoreGive(bleLock->bleMutex);
             Log.verbose(F("characteristicCreationTask: Mutex unlock"));
+            delete cmd;
         }
     }
 }

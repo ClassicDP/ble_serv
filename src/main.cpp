@@ -38,21 +38,24 @@ void logPrefix(Print* _logOutput, int logLevel) {
 }
 
 void logSuffix(Print* _logOutput, int logLevel) {
+    // ANSI escape codes for colors
     const char* colorReset = "\x1B[0m";
     _logOutput->print(colorReset); // Reset color
     _logOutput->println(); // Add newline
 }
+
+
+
 
 void setup() {
     Serial.begin(115200);
     while (!Serial);
 
     Log.begin(LOG_LEVEL_VERBOSE, &Serial);
-    Log.setPrefix(logPrefix);  // Using the function you defined
-    Log.setSuffix(logSuffix);
+    Log.setPrefix(&logPrefix);
+    Log.setSuffix(&logSuffix);
 
-    Serial.println("\033[96mHello in Cyan\033[0m");
-    Log.notice(F("Start setup"));
+    logColor(LColor::LightBlue, F("Start setup"));
 
     bool registerResOk = []() {
         MessageBase::registerConstructor("resOk", []() -> MessageBase* { return new ResOk(); });
@@ -64,7 +67,7 @@ void setup() {
     }();
 
     if (!SPIFFS.begin(true)) {
-        Log.error(F("An error has occurred while mounting SPIFFS"));
+        logColor(LColor::Red, F("An error has occurred while mounting SPIFFS"));
         return;
     }
     wifiManager.begin();
@@ -84,6 +87,5 @@ void loop() {
         Log.notice(F("CPU Temperature: %s °C"), temperatureStr);
         lastTempCheck = millis();
     }
-
-    delay(100);
 }
+
