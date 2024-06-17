@@ -1,7 +1,6 @@
 #include "BleLock.h"
 #include <iostream>
 
-
 // Callbacks Implementation
 PublicCharacteristicCallbacks::PublicCharacteristicCallbacks(BleLock *lock) : lock(lock) {}
 
@@ -62,9 +61,6 @@ void logColor(LColor color, const __FlashStringHelper* format, ...) {
     Serial.println();
 }
 
-
-
-
 void PublicCharacteristicCallbacks::onRead(NimBLECharacteristic *pCharacteristic) {
     logColor(LColor::Green, F("PublicCharacteristicCallbacks::onRead called"));
     lock->handlePublicCharacteristicRead(pCharacteristic);
@@ -116,6 +112,7 @@ ServerCallbacks::ServerCallbacks(BleLock *lock) : lock(lock) {}
 
 void ServerCallbacks::onConnect(NimBLEServer *pServer) {
     Log.verbose(F("Device connected"));
+    printCharacteristics(pServer->getServiceByUUID("ABCD"));
 }
 
 void ServerCallbacks::onDisconnect(NimBLEServer *pServer) {
@@ -180,6 +177,10 @@ void BleLock::setup() {
         return;
     }
     pAdvertising->addServiceUUID("ABCD");
+    pAdvertising->addServiceUUID(pService->getUUID());  // Advertise the service UUID
+    for (const auto &pair : uniqueCharacteristics) {
+        pAdvertising->addServiceUUID(pair.first);  // Advertise each characteristic UUID
+    }
     Log.verbose(F("Advertising started"));
     pAdvertising->start();
 
@@ -230,6 +231,7 @@ void BleLock::handlePublicCharacteristicRead(NimBLECharacteristic *pCharacterist
     std::string newUUID = generateUUID();
     Log.verbose(F("Generated new UUID: %s"), newUUID.c_str());
     pCharacteristic->setValue(newUUID);
+    resumeAdvertising();
     Log.verbose(F(" - resumeAdvertising"));
     auto cmd = new CreateCharacteristicCmd{newUUID, pCharacteristic};
     if (xQueueSend(characteristicCreationQueue, &cmd, portMAX_DELAY) != pdPASS) {
@@ -330,6 +332,9 @@ void BleLock::saveCharacteristicsToMemory() {
 void BleLock::resumeAdvertising() {
     Log.verbose(F("Attempting to resume advertising..."));
     NimBLEAdvertising *pAdvertising = pServer->getAdvertising();
+    for (const auto &pair : uniqueCharacteristics) {
+        pAdvertising->addServiceUUID(pair.first);  // Advertise each characteristic UUID
+    }
     if (pAdvertising->start()) {
         Log.verbose(F("Advertising resumed"));
     } else {
