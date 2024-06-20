@@ -45,8 +45,6 @@ void logSuffix(Print* _logOutput, int logLevel) {
 }
 
 
-
-
 void setup() {
     Serial.begin(115200);
     while (!Serial);

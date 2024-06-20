@@ -331,16 +331,26 @@ void BleLock::saveCharacteristicsToMemory() {
 
 void BleLock::resumeAdvertising() {
     Log.verbose(F("Attempting to resume advertising..."));
+
     NimBLEAdvertising *pAdvertising = pServer->getAdvertising();
+
+    // Очистите рекламные данные и добавьте сервисы
+    pAdvertising->reset();
+    pAdvertising->addServiceUUID("ABCD");
+
+
     for (const auto &pair : uniqueCharacteristics) {
-        pAdvertising->addServiceUUID(pair.first);  // Advertise each characteristic UUID
+        Log.verbose(F("Renewing advertising for %s"), pair.first.c_str());
+        pAdvertising->addServiceUUID(pair.first);  // Рекламируйте каждый UUID характеристики
     }
+
     if (pAdvertising->start()) {
         Log.verbose(F("Advertising resumed"));
     } else {
         Log.error(F("Failed to resume advertising"));
     }
 }
+
 
 void BleLock::stopService() {
     Log.verbose(F("Attempting to stop Advertising..."));
@@ -396,6 +406,7 @@ void BleLock::startService() {
             bleLock->saveCharacteristicsToMemory();
             Log.verbose(F(" - saveCharacteristicsToMemory"));
 
+            bleLock->resumeAdvertising();
 
             // Unlock the mutex for service operations
             xSemaphoreGive(bleLock->bleMutex);
