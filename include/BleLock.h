@@ -10,11 +10,27 @@
 #include "MessageBase.h"
 #include "ArduinoLog.h"
 
+#include <unordered_map>
+#include <unordered_set>
+
+
+void registerClient (std::string mac);
+void registerClientCharacteristic (std::string mac, std::string uuid, BLECharacteristic *characteristic);
+void unregisterClient (std::string mac);
+void unregisterClientCharacteristic (std::string mac, std::string uuid);
+BLECharacteristic * findClientCharacteristic (std::string mac, std::string uuid);
+BLECharacteristic * firstClientCharacteristic (std::string mac, std::string &uuid);
+
+
+
+extern std::unordered_map<std::string, std::string > uniqueServers;
+
 using json = nlohmann::json;
 
 struct CreateCharacteristicCmd {
     std::string uuid;
     NimBLECharacteristic * pCharacteristic;
+    bool alreadyCreated;
 };
 
 enum class LColor {
@@ -37,7 +53,7 @@ public:
 
     QueueHandle_t getOutgoingQueueHandle();
 
-    void handlePublicCharacteristicRead(BLECharacteristic *pCharacteristic);
+    void handlePublicCharacteristicRead(BLECharacteristic *pCharacteristic, std::string mac);
 
     void resumeAdvertising();
 
@@ -85,7 +101,7 @@ class PublicCharacteristicCallbacks : public BLECharacteristicCallbacks {
 public:
     explicit PublicCharacteristicCallbacks(BleLock *lock);
 
-    void onRead(BLECharacteristic *pCharacteristic) override;
+    void onRead(BLECharacteristic *pCharacteristic, ble_gap_conn_desc* desc) override;
 
 private:
     BleLock *lock;
@@ -95,9 +111,9 @@ class UniqueCharacteristicCallbacks : public BLECharacteristicCallbacks {
 public:
     UniqueCharacteristicCallbacks(BleLock *lock, std::string uuid);
 
-    void onWrite(BLECharacteristic *pCharacteristic) override;
+    void onWrite(BLECharacteristic *pCharacteristic, ble_gap_conn_desc* desc) override;
 
-    void onRead(BLECharacteristic *pCharacteristic) override;
+    void onRead(BLECharacteristic *pCharacteristic, ble_gap_conn_desc* desc) override;
 
 private:
     BleLock *lock;
@@ -108,9 +124,9 @@ class ServerCallbacks : public BLEServerCallbacks {
 public:
     explicit ServerCallbacks(BleLock *lock);
 
-    void onConnect(BLEServer *pServer) override;
+    void onConnect(BLEServer *pServer, ble_gap_conn_desc* desc) override;
 
-    void onDisconnect(BLEServer *pServer) override;
+    void onDisconnect(BLEServer *pServer, ble_gap_conn_desc* desc) override;
 
 private:
     BleLock *lock;
