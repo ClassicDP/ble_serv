@@ -8,6 +8,7 @@
 
 using json = nlohmann::json;
 
+
 class MessageBase {
 public:
     std::string sourceAddress;
