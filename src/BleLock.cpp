@@ -4,6 +4,13 @@
 // Callbacks Implementation
 PublicCharacteristicCallbacks::PublicCharacteristicCallbacks(BleLock *lock) : lock(lock) {}
 
+void PublicCharacteristicCallbacks::onRead(NimBLECharacteristic *pCharacteristic, ble_gap_conn_desc *desc) {
+    NimBLECharacteristicCallbacks::onRead(pCharacteristic, desc);
+    auto mac = NimBLEAddress(desc->peer_ota_addr).toString();
+    logColor(LColor::Green, F("PublicCharacteristicCallbacks::onRead called from %s"), mac.c_str());
+    lock->handlePublicCharacteristicRead(pCharacteristic, mac);
+}
+
 void printCharacteristics(NimBLEService* pService) {
     Serial.println("Listing characteristics:");
 
@@ -61,10 +68,7 @@ void logColor(LColor color, const __FlashStringHelper* format, ...) {
     Serial.println();
 }
 
-void PublicCharacteristicCallbacks::onRead(NimBLECharacteristic *pCharacteristic, const std::string& mac) {
-    logColor(LColor::Green, F("PublicCharacteristicCallbacks::onRead called"));
-    lock->handlePublicCharacteristicRead(pCharacteristic, mac);
-}
+
 
 UniqueCharacteristicCallbacks::UniqueCharacteristicCallbacks(BleLock *lock, std::string uuid)
         : lock(lock), uuid(std::move(uuid)) {}
@@ -234,7 +238,7 @@ void BleLock::handlePublicCharacteristicRead(NimBLECharacteristic *pCharacterist
         std::string existingUUID = pairedDevices[mac];
         pCharacteristic->setValue(existingUUID);
         resumeAdvertising();
-        Log.verbose(F("Device already paired, provided existing UUID: %s"), existingUUID.c_str());
+        logColor(LColor::Green, F("Device already paired, provided existing UUID: %s"), existingUUID.c_str());
         return;
     }
 
@@ -242,6 +246,7 @@ void BleLock::handlePublicCharacteristicRead(NimBLECharacteristic *pCharacterist
     Log.verbose(F("Generated new UUID: %s"), newUUID.c_str());
     pCharacteristic->setValue(newUUID);
     awaitingKeys.insert(newUUID);
+    pairedDevices[mac] = newUUID;
     resumeAdvertising();
     Log.verbose(F(" - resumeAdvertising"));
     auto cmd = new CreateCharacteristicCmd{newUUID, pCharacteristic};

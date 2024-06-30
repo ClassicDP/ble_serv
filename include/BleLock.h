@@ -82,13 +82,13 @@ private:
 
 class PublicCharacteristicCallbacks : public BLECharacteristicCallbacks {
 public:
+    void onRead(BLECharacteristic *pCharacteristic, ble_gap_conn_desc *desc) override;
+
+
     explicit PublicCharacteristicCallbacks(BleLock *lock);
-
-
 private:
-    BleLock *lock;
 
-    void onRead(NimBLECharacteristic *pCharacteristic, const std::string &mac);
+    BleLock *lock;
 };
 
 class UniqueCharacteristicCallbacks : public BLECharacteristicCallbacks {

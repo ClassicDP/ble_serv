@@ -85,6 +85,10 @@ void loop() {
         dtostrf(temperature, 6, 2, temperatureStr);
 
         Log.notice(F("CPU Temperature: %s °C"), temperatureStr);
+
+        size_t freeHeap = esp_get_free_heap_size();
+        // Print the free heap memory to the Serial Monitor
+        logColor(LColor::Yellow, F("Free heap memory:  %d bytes"), freeHeap);
         lastTempCheck = millis();
     }
 }
