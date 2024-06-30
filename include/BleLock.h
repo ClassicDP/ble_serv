@@ -10,27 +10,11 @@
 #include "MessageBase.h"
 #include "ArduinoLog.h"
 
-#include <unordered_map>
-#include <unordered_set>
-
-
-void registerClient (std::string mac);
-void registerClientCharacteristic (std::string mac, std::string uuid, BLECharacteristic *characteristic);
-void unregisterClient (std::string mac);
-void unregisterClientCharacteristic (std::string mac, std::string uuid);
-BLECharacteristic * findClientCharacteristic (std::string mac, std::string uuid);
-BLECharacteristic * firstClientCharacteristic (std::string mac, std::string &uuid);
-
-
-
-extern std::unordered_map<std::string, std::string > uniqueServers;
-
 using json = nlohmann::json;
 
 struct CreateCharacteristicCmd {
     std::string uuid;
     NimBLECharacteristic * pCharacteristic;
-    bool alreadyCreated;
 };
 
 enum class LColor {
@@ -51,9 +35,8 @@ public:
 
     void setup();
 
-    QueueHandle_t getOutgoingQueueHandle();
 
-    void handlePublicCharacteristicRead(BLECharacteristic *pCharacteristic, std::string mac);
+    void handlePublicCharacteristicRead(NimBLECharacteristic *pCharacteristic, const std::string& mac);
 
     void resumeAdvertising();
 
@@ -74,16 +57,17 @@ public:
     QueueHandle_t characteristicCreationQueue;
     std::unordered_map<std::string, BLECharacteristic *> uniqueCharacteristics;
     std::unordered_map<std::string, bool> confirmedCharacteristics;
+    std::unordered_map<std::string, std::string> pairedDevices; // map for paired devices
     std::unordered_set<std::string> awaitingKeys;
     std::string memoryFilename;
     uint32_t autoincrement;
     std::string lockName;
-    SemaphoreHandle_t bleMutex;
+    SemaphoreHandle_t bleMutex{};
     BLEServer *pServer;
     BLEService *pService;
     BLECharacteristic *pPublicCharacteristic;
 
-    QueueHandle_t jsonParsingQueue;
+    QueueHandle_t jsonParsingQueue{};
 private:
     [[noreturn]] [[noreturn]] static void characteristicCreationTask(void *pvParameter);
 
@@ -94,26 +78,26 @@ private:
     MessageBase *request(MessageBase *requestMessage, const std::string &destAddr, uint32_t timeout) const;
 
     QueueHandle_t getOutgoingQueueHandle() const;
-
 };
 
 class PublicCharacteristicCallbacks : public BLECharacteristicCallbacks {
 public:
     explicit PublicCharacteristicCallbacks(BleLock *lock);
 
-    void onRead(BLECharacteristic *pCharacteristic, ble_gap_conn_desc* desc) override;
 
 private:
     BleLock *lock;
+
+    void onRead(NimBLECharacteristic *pCharacteristic, const std::string &mac);
 };
 
 class UniqueCharacteristicCallbacks : public BLECharacteristicCallbacks {
 public:
     UniqueCharacteristicCallbacks(BleLock *lock, std::string uuid);
 
-    void onWrite(BLECharacteristic *pCharacteristic, ble_gap_conn_desc* desc) override;
+    void onWrite(BLECharacteristic *pCharacteristic) override;
 
-    void onRead(BLECharacteristic *pCharacteristic, ble_gap_conn_desc* desc) override;
+    void onRead(BLECharacteristic *pCharacteristic) override;
 
 private:
     BleLock *lock;
@@ -124,12 +108,13 @@ class ServerCallbacks : public BLEServerCallbacks {
 public:
     explicit ServerCallbacks(BleLock *lock);
 
-    void onConnect(BLEServer *pServer, ble_gap_conn_desc* desc) override;
-
-    void onDisconnect(BLEServer *pServer, ble_gap_conn_desc* desc) override;
 
 private:
     BleLock *lock;
+
+    void onDisconnect(NimBLEServer *pServer, ble_gap_conn_desc *desc) override;
+
+    void onConnect(NimBLEServer *pServer, ble_gap_conn_desc *desc) override;
 };
 
 #endif // BLE_LOCK_H

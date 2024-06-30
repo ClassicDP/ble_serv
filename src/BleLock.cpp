@@ -1,126 +1,4 @@
 #include "BleLock.h"
-#include <iostream>
-
-#include <vector>
-
-std::unordered_map<std::string, std::string > uniqueServers;
-
-//////////////////////////////
-struct clientCharacteristic
-{
-    std::string uuid;
-    BLECharacteristic *characteristic;
-};
-
-std::unordered_map<std::string, std::vector<clientCharacteristic> > clientsAndCharacteristics;
-
-int findInVector(std::string uuid, std::vector<clientCharacteristic> &chars)
-{
-    for (int i=0; i < chars.size(); i++)
-    {
-        if (chars[i].uuid == uuid)
-            return i;
-    }
-    return -1;
-}
-
-void registerClient (std::string mac)
-{
-    std::vector<clientCharacteristic> empty;
-    auto client = clientsAndCharacteristics.find(mac);
-    if (client == clientsAndCharacteristics.end())
-    {
-        clientsAndCharacteristics.insert_or_assign (mac,empty);
-    }
-}
-
-void registerClientCharacteristic (std::string mac, std::string uuid, BLECharacteristic *characteristic)
-{
-    auto client = clientsAndCharacteristics.find(mac);
-    if (client == clientsAndCharacteristics.end())
-    {
-        registerClient (mac);        
-    }
-    client = clientsAndCharacteristics.find(mac);
-    if (client != clientsAndCharacteristics.end())
-    {
-        int pos = findInVector (client->first,client->second);
-        if (pos<0)
-        {
-            clientCharacteristic newCharacteristic;
-            newCharacteristic.uuid = uuid;
-            newCharacteristic.characteristic = characteristic;
-            client->second.push_back(newCharacteristic);
-        }
-    }
-}
-void unregisterClient (std::string mac)
-{
-    auto client = clientsAndCharacteristics.find(mac);
-    if (client != clientsAndCharacteristics.end())
-    {
-        clientsAndCharacteristics.erase(client);
-    }
-}
-
-void unregisterClientCharacteristic (std::string mac, std::string uuid)
-{
-    auto client = clientsAndCharacteristics.find(mac);
-    if (client == clientsAndCharacteristics.end())
-    {
-        registerClient (mac);        
-    }
-    client = clientsAndCharacteristics.find(mac);
-    if (client != clientsAndCharacteristics.end())
-    {
-        int pos = findInVector (client->first,client->second);
-        if (pos>=0)
-        {
-            client->second.erase (client->second.begin()+pos);
-            return;
-        }
-    }
-}
-
-BLECharacteristic * findClientCharacteristic (std::string mac, std::string uuid)
-{
-    auto client = clientsAndCharacteristics.find(mac);
-    if (client == clientsAndCharacteristics.end())
-    {
-        registerClient (mac);        
-    }
-    client = clientsAndCharacteristics.find(mac);
-    if (client != clientsAndCharacteristics.end())
-    {
-        int pos = findInVector (client->first,client->second);
-        if (pos>=0)
-        {
-            return client->second[pos].characteristic;
-        }
-    }
-    return nullptr;
-}
-
-BLECharacteristic * firstClientCharacteristic (std::string mac, std::string &uuid)
-{
-    auto client = clientsAndCharacteristics.find(mac);
-    if (client == clientsAndCharacteristics.end())
-    {
-        registerClient (mac);        
-    }
-    client = clientsAndCharacteristics.find(mac);
-    if (client != clientsAndCharacteristics.end())
-    {
-        if (client->second.size()>0)
-        {
-            uuid = client->first;
-            return client->second[0].characteristic;            
-        }
-    }
-    return nullptr;
-}
-
-
 
 
 // Callbacks Implementation
@@ -183,16 +61,15 @@ void logColor(LColor color, const __FlashStringHelper* format, ...) {
     Serial.println();
 }
 
-void PublicCharacteristicCallbacks::onRead(NimBLECharacteristic *pCharacteristic, ble_gap_conn_desc* desc) {
+void PublicCharacteristicCallbacks::onRead(NimBLECharacteristic *pCharacteristic, const std::string& mac) {
     logColor(LColor::Green, F("PublicCharacteristicCallbacks::onRead called"));
-    std::string mac = NimBLEAddress(desc->peer_ota_addr).toString();
-    lock->handlePublicCharacteristicRead(pCharacteristic,mac);
+    lock->handlePublicCharacteristicRead(pCharacteristic, mac);
 }
 
 UniqueCharacteristicCallbacks::UniqueCharacteristicCallbacks(BleLock *lock, std::string uuid)
         : lock(lock), uuid(std::move(uuid)) {}
 
-void UniqueCharacteristicCallbacks::onWrite(NimBLECharacteristic *pCharacteristic, ble_gap_conn_desc* desc) {
+void UniqueCharacteristicCallbacks::onWrite(NimBLECharacteristic *pCharacteristic) {
     logColor(LColor::Yellow, F("UniqueCharacteristicCallbacks::onWrite called"));
 
     std::string receivedMessage = pCharacteristic->getValue();
@@ -226,7 +103,7 @@ MessageBase *BleLock::request(MessageBase *requestMessage, const std::string &de
     return nullptr;
 }
 
-void UniqueCharacteristicCallbacks::onRead(NimBLECharacteristic *pCharacteristic, ble_gap_conn_desc* desc) {
+void UniqueCharacteristicCallbacks::onRead(NimBLECharacteristic *pCharacteristic) {
     Log.verbose(F("UniqueCharacteristicCallbacks::onRead called"));
     NimBLECharacteristicCallbacks::onRead(pCharacteristic);
 }
@@ -328,6 +205,8 @@ void BleLock::setup() {
     // Create the JSON parsing task
     xTaskCreate(jsonParsingTask, "JsonParsingTask", 8192, this, 1, nullptr);
     Log.verbose(F("JsonParsingTask created"));
+
+    loadCharacteristicsFromMemory();
 }
 
 QueueHandle_t BleLock::getOutgoingQueueHandle() const {
@@ -350,36 +229,26 @@ std::string BleLock::generateUUID() {
              (esp_random() & 0x0FFF) | 0x4000,
              (esp_random() & 0x3FFF) | 0x8000,
              esp_random());
-    saveCharacteristicsToMemory();
     return {uuid};
 }
 
-void BleLock::handlePublicCharacteristicRead(NimBLECharacteristic *pCharacteristic, std::string mac)
-{
-    //public always first?
-
-    std::string newUUID;
-    NimBLECharacteristic *oldValue=firstClientCharacteristic(mac, newUUID);
-
-    CreateCharacteristicCmd *cmd = nullptr;
-    if ( oldValue == nullptr )
-    {
-        newUUID = generateUUID();
-        Log.verbose(F("Generated new UUID: %s"), newUUID.c_str());
-        pCharacteristic->setValue(newUUID);
+void BleLock::handlePublicCharacteristicRead(NimBLECharacteristic *pCharacteristic, const std::string& mac) {
+    if (pairedDevices.find(mac) != pairedDevices.end()) {
+        // If device is already paired, provide existing UUID
+        std::string existingUUID = pairedDevices[mac];
+        pCharacteristic->setValue(existingUUID);
         resumeAdvertising();
-        Log.verbose(F(" - resumeAdvertising"));
-        cmd = new CreateCharacteristicCmd{newUUID, pCharacteristic};
-        cmd->alreadyCreated = false;
-    }
-    else
-    {
-        Log.verbose(F("Found UUID: %s"), newUUID.c_str());
-        resumeAdvertising();
-        cmd = new CreateCharacteristicCmd{newUUID, oldValue};
-        cmd->alreadyCreated = true;
+        Log.verbose(F("Device already paired, provided existing UUID: %s"), existingUUID.c_str());
+        return;
     }
 
+    std::string newUUID = generateUUID();
+    Log.verbose(F("Generated new UUID: %s"), newUUID.c_str());
+    pCharacteristic->setValue(newUUID);
+    awaitingKeys.insert(newUUID);
+    resumeAdvertising();
+    Log.verbose(F(" - resumeAdvertising"));
+    auto cmd = new CreateCharacteristicCmd{newUUID, pCharacteristic};
     if (xQueueSend(characteristicCreationQueue, &cmd, portMAX_DELAY) != pdPASS) {
         Log.error(F("Failed to send UUID to characteristicCreationQueue"));
         delete cmd;
@@ -409,7 +278,7 @@ void BleLock::loadCharacteristicsFromMemory() {
 
             json characteristics = doc["characteristics"];
             for (auto &kv: characteristics.items()) {
-                std::string uuid = kv.key();
+                const std::string& uuid = kv.key();
                 bool confirmed = kv.value().get<bool>();
                 Log.verbose(F("Loading characteristic with UUID: %s, confirmed: %d"), uuid.c_str(), confirmed);
 
@@ -433,8 +302,16 @@ void BleLock::loadCharacteristicsFromMemory() {
                 confirmedCharacteristics[uuid] = confirmed;
             }
 
+            json devices = doc["pairedDevices"];
+            for (auto &kv: devices.items()) {
+                const std::string& mac = kv.key();
+                std::string uuid = kv.value();
+                pairedDevices[mac] = uuid;
+                Log.verbose(F("Loaded paired device with MAC: %s, UUID: %s"), mac.c_str(), uuid.c_str());
+            }
+
             file.close();
-            Log.verbose(F("All characteristics loaded successfully."));
+            Log.verbose(F("All characteristics and paired devices loaded successfully."));
         } else {
             Log.error(F("Failed to open file. File may not exist."));
         }
@@ -465,6 +342,12 @@ void BleLock::saveCharacteristicsToMemory() {
     }
     doc["characteristics"] = characteristics;
 
+    json devices;
+    for (const auto &pair : pairedDevices) {
+        devices[pair.first] = pair.second;
+    }
+    doc["pairedDevices"] = devices;
+
     File file = SPIFFS.open(memoryFilename.c_str(), FILE_WRITE);
     if (file) {
         file.print(doc.dump().c_str());
@@ -477,10 +360,18 @@ void BleLock::saveCharacteristicsToMemory() {
 
 void BleLock::resumeAdvertising() {
     Log.verbose(F("Attempting to resume advertising..."));
+
     NimBLEAdvertising *pAdvertising = pServer->getAdvertising();
+
+    // Очистите рекламные данные и добавьте сервисы
+    pAdvertising->reset();
+    pAdvertising->addServiceUUID("ABCD");
+
     for (const auto &pair : uniqueCharacteristics) {
-        pAdvertising->addServiceUUID(pair.first);  // Advertise each characteristic UUID
+        Log.verbose(F("Renewing advertising for %s"), pair.first.c_str());
+        pAdvertising->addServiceUUID(pair.first);  // Рекламируйте каждый UUID характеристики
     }
+
     if (pAdvertising->start()) {
         Log.verbose(F("Advertising resumed"));
     } else {
@@ -520,14 +411,7 @@ void BleLock::startService() {
             xSemaphoreTake(bleLock->bleMutex, portMAX_DELAY);
             Log.verbose(F("characteristicCreationTask: Mutex lock"));
 
-//            bleLock->stopService();
-//            Log.verbose(F(" - stopService"));
-
-            NimBLECharacteristic *newCharacteristic;
-            if (cmd->alreadyCreated)
-                newCharacteristic = cmd->pCharacteristic;
-            else
-                newCharacteristic = bleLock->pService->createCharacteristic(
+            NimBLECharacteristic *newCharacteristic = bleLock->pService->createCharacteristic(
                     NimBLEUUID::fromString(uuidStr),
                     NIMBLE_PROPERTY::NOTIFY | NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE
             );
@@ -546,6 +430,7 @@ void BleLock::startService() {
             bleLock->saveCharacteristicsToMemory();
             Log.verbose(F(" - saveCharacteristicsToMemory"));
 
+            bleLock->resumeAdvertising();
 
             // Unlock the mutex for service operations
             xSemaphoreGive(bleLock->bleMutex);
