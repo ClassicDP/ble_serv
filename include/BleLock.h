@@ -97,11 +97,11 @@ public:
 
     void onWrite(BLECharacteristic *pCharacteristic) override;
 
-    void onRead(BLECharacteristic *pCharacteristic) override;
 
 private:
     BleLock *lock;
     std::string uuid;
+
 };
 
 class ServerCallbacks : public BLEServerCallbacks {

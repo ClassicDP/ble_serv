@@ -103,10 +103,6 @@ MessageBase *BleLock::request(MessageBase *requestMessage, const std::string &de
     return nullptr;
 }
 
-void UniqueCharacteristicCallbacks::onRead(NimBLECharacteristic *pCharacteristic) {
-    Log.verbose(F("UniqueCharacteristicCallbacks::onRead called"));
-    NimBLECharacteristicCallbacks::onRead(pCharacteristic);
-}
 
 ServerCallbacks::ServerCallbacks(BleLock *lock) : lock(lock) {}
 
