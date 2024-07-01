@@ -239,6 +239,11 @@ void BleLock::handlePublicCharacteristicRead(NimBLECharacteristic *pCharacterist
         pCharacteristic->setValue(existingUUID);
         resumeAdvertising();
         logColor(LColor::Green, F("Device already paired, provided existing UUID: %s"), existingUUID.c_str());
+        auto cmd = new CreateCharacteristicCmd{existingUUID, pCharacteristic};
+        if (xQueueSend(characteristicCreationQueue, &cmd, portMAX_DELAY) != pdPASS) {
+            Log.error(F("Failed to send UUID to characteristicCreationQueue"));
+            delete cmd;
+        }
         return;
     }
 
