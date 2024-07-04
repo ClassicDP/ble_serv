@@ -1,11 +1,12 @@
 #include "MessageBase.h"
 #include <sstream>
+#include <utility>
 #include "Arduino.h"
 
 std::unordered_map<std::string, MessageBase::Constructor> MessageBase::constructors;
 
 void MessageBase::registerConstructor(const std::string& type, Constructor constructor) {
-    constructors[type] = constructor;
+    constructors[type] = std::move(constructor);
 }
 
 MessageBase* MessageBase::createInstance(const std::string& input) {

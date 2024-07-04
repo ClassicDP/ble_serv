@@ -62,7 +62,7 @@ public:
         uint8_t iv[16];
         mbedtls_ctr_drbg_random(&ctr_drbg, iv, sizeof(iv));
 
-        AES_ctx ctx;
+        AES_ctx ctx{};
         AES_init_ctx_iv(&ctx, aesKeys[uuid].data(), iv);
 
         std::vector<uint8_t> buffer(message.begin(), message.end());
@@ -106,7 +106,7 @@ public:
         Serial.print("Decrypted Message (partial): ");
         printHex(std::vector<uint8_t>(buffer.begin(), buffer.begin() + 16)); // print first 16 bytes
 
-        return std::string(buffer.begin(), buffer.end());
+        return {std::string(buffer.begin(), buffer.end())};
     }
 
     std::string encryptMessageRSA(const std::vector<uint8_t>& message, const std::string& uuid) {
@@ -140,7 +140,7 @@ public:
         Serial.print("Encrypted RSA Message (partial): ");
         printHex(std::vector<uint8_t>(output.begin(), output.begin() + 16)); // print first 16 bytes
 
-        return std::string(reinterpret_cast<char*>(output.data()), output_len);
+        return {std::string(reinterpret_cast<char *>(output.data()), output_len)};
     }
 
     std::vector<uint8_t> decryptMessageRSA(const std::string& encryptedMessage, const std::string& uuid) {
@@ -151,7 +151,7 @@ public:
         mbedtls_pk_context pk;
         mbedtls_pk_init(&pk);
         std::string privateKeyStr = vectorToString(keys[uuid].second);
-        int ret = mbedtls_pk_parse_key(&pk, reinterpret_cast<const unsigned char*>(privateKeyStr.c_str()), privateKeyStr.length() + 1, NULL, 0);
+        int ret = mbedtls_pk_parse_key(&pk, reinterpret_cast<const unsigned char*>(privateKeyStr.c_str()), privateKeyStr.length() + 1, nullptr, 0);
         if (ret != 0) {
             mbedtls_pk_free(&pk);
             char error_buf[100];
@@ -179,7 +179,7 @@ public:
         Serial.print("Decrypted RSA Message (partial): ");
         printHex(std::vector<uint8_t>(output.begin(), output.begin() + 16)); // print first 16 bytes
 
-        return std::vector<uint8_t>(output.begin(), output.begin() + output_len);
+        return {std::vector<uint8_t>(output.begin(), output.begin() + output_len)};
     }
 
     static std::string generatePublicKeyHash(const std::vector<uint8_t>& publicKey, size_t bitLength) {
@@ -203,11 +203,11 @@ public:
     }
 
     static std::string vectorToString(const std::vector<uint8_t>& vec) {
-        return std::string(vec.begin(), vec.end());
+        return {std::string(vec.begin(), vec.end())};
     }
 
     static std::vector<uint8_t> stringToVector(const std::string& str) {
-        return std::vector<uint8_t>(str.begin(), str.end());
+        return {std::vector<uint8_t>(str.begin(), str.end())};
     }
 
     static void printHex(const std::vector<uint8_t>& vec) {
