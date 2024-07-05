@@ -6,11 +6,11 @@ public:
     bool status{};
 
     ResOk() {
-        type = "resOk";
+        type = MessageType::ResOk;
     }
 
     explicit ResOk(bool status) : status(status) {
-        type = "resOk";
+        type = MessageType::ResOk;
     }
 
 protected:
@@ -32,7 +32,7 @@ public:
     std::string key;
 
     ReqRegKey() {
-        type = "reqRegKey";
+        type = MessageType::reqRegKey;
     }
 
     MessageBase *processRequest(void *context) override {

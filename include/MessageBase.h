@@ -7,13 +7,30 @@
 #include "json.hpp"
 
 using json = nlohmann::json;
+#define DECLARE_ENUM_WITH_STRING_CONVERSIONS(name, ...) \
+    enum class name { __VA_ARGS__, COUNT }; \
+    inline const char* ToString(name v) { \
+        static constexpr const char* strings[] = { #__VA_ARGS__ }; \
+        return strings[static_cast<int>(v)]; \
+    } \
+    inline name FromString(const std::string& str) { \
+        static constexpr const char* strings[] = { #__VA_ARGS__ }; \
+        for (int i = 0; i < static_cast<int>(name::COUNT); ++i) { \
+            if (str == strings[i]) { \
+                return static_cast<name>(i); \
+            } \
+        } \
+        throw std::invalid_argument("Invalid enum value: " + str); \
+    }
+
+DECLARE_ENUM_WITH_STRING_CONVERSIONS(MessageType, ResOk, reqRegKey)
 
 
 class MessageBase {
 public:
     std::string sourceAddress;
     std::string destinationAddress;
-    std::string type;
+    MessageType type;
 
     MessageBase() = default;
 

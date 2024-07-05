@@ -459,7 +459,7 @@ void BleLock::startService() {
             Log.verbose(F("Message received from queue"));
 
             Log.verbose(F("BleLock::responseMessageTask msg: %s %s"), responseMessage->destinationAddress.c_str(),
-                        responseMessage->type.c_str());
+                        ToString(responseMessage->type));
 
             // Lock the mutex for advertising and characteristic operations
             Log.verbose(F("outgoingMessageTask: Waiting for Mutex"));
@@ -512,7 +512,7 @@ void BleLock::startService() {
             try {
                 auto msg = MessageBase::createInstance(*receivedMessageStr);
                 if (msg) {
-                    Log.verbose(F("Received request from: %s with type: %s"), msg->sourceAddress.c_str(), msg->type.c_str());
+                    Log.verbose(F("Received request from: %s with type: %s"), msg->sourceAddress.c_str(), ToString(msg->type));
 
                     MessageBase *responseMessage = msg->processRequest(bleLock);
                     delete msg;
