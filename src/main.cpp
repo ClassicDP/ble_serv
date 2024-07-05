@@ -128,11 +128,11 @@ void setup() {
     Serial.println("After setup2");  // Отладочное сообщение
 
     bool registerResOk = []() {
-        MessageBase::registerConstructor("resOk", []() -> MessageBase * { return new ResOk(); });
+        MessageBase::registerConstructor(MessageType::ResOk, []() -> MessageBase * { return new ResOk(); });
         return true;
     }();
     bool registerReqRegKey = []() {
-        MessageBase::registerConstructor("reqRegKey", []() -> MessageBase * { return new ReqRegKey(); });
+        MessageBase::registerConstructor(MessageType::reqRegKey, []() -> MessageBase * { return new ReqRegKey(); });
         return true;
     }();
 

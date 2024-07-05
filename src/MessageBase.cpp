@@ -5,8 +5,8 @@
 
 std::unordered_map<std::string, MessageBase::Constructor> MessageBase::constructors;
 
-void MessageBase::registerConstructor(const std::string& type, Constructor constructor) {
-    constructors[type] = std::move(constructor);
+void MessageBase::registerConstructor(const MessageType& type, Constructor constructor) {
+    constructors[ToString(type)] = std::move(constructor);
 }
 
 MessageBase* MessageBase::createInstance(const std::string& input) {

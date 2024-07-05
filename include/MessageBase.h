@@ -39,8 +39,9 @@ public:
     virtual ~MessageBase() = default;
 
     using Constructor = std::function<MessageBase*()>;
-    static void registerConstructor(const std::string& type, Constructor constructor);
     static MessageBase* createInstance(const std::string& input);
+
+    static void registerConstructor(const MessageType &type, Constructor constructor);
 
 protected:
     virtual void serializeExtraFields(json& doc) = 0;
