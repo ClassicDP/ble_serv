@@ -112,12 +112,12 @@ MessageBase* BleLock::request(MessageBase* requestMessage, const std::string& de
         if (xQueuePeek(responseQueue, &receivedMessage, pdMS_TO_TICKS(timeout) - elapsed) == pdTRUE) {
             // Create an instance of MessageBase from the received message
             MessageBase* instance = MessageBase::createInstance(*receivedMessage);
-            // Remove the item from the queue after peeking
-            xQueueReceive(responseQueue, &receivedMessage, 0);
-            delete receivedMessage; // Delete the received message pointer
 
             // Check if the source address matches the destination address
             if (instance->sourceAddress == destAddr) {
+                // Remove the item from the queue after confirming the source address matches
+                xQueueReceive(responseQueue, &receivedMessage, 0);
+                delete receivedMessage; // Delete the received message pointer
                 return instance;
             }
             delete instance;
