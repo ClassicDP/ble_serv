@@ -1,6 +1,7 @@
 #include "MessageBase.h"
 #include <sstream>
 #include <utility>
+#include <random>
 #include "Arduino.h"
 
 std::unordered_map<std::string, MessageBase::Constructor> MessageBase::constructors;
@@ -45,15 +46,30 @@ std::string MessageBase::serialize() {
     json doc;
     doc["sourceAddress"] = sourceAddress;
     doc["destinationAddress"] = destinationAddress;
-    doc["type"] = type;
+    doc["type"] = ToString(type);
+    doc["requestUUID"] = requestUUID; // Serialize the request UUID
+
     serializeExtraFields(doc);
-    return doc.dump(); // Use dump() to convert JSON to string
+    return doc.dump();
 }
 
+
 void MessageBase::deserialize(const std::string& input) {
-    json doc = json::parse(input);
+    auto doc = json::parse(input);
     sourceAddress = doc["sourceAddress"];
     destinationAddress = doc["destinationAddress"];
-    type = doc["type"];
+    type = FromString(doc["type"]);
+    requestUUID = doc["requestUUID"]; // Deserialize the request UUID
+
     deserializeExtraFields(doc);
+}
+
+std::string MessageBase::generateUUID() {
+    static std::random_device rd;
+    static std::mt19937 generator(rd());
+    static std::uniform_int_distribution<uint32_t> distribution(0, 0xFFFFFFFF);
+
+    std::ostringstream oss;
+    oss << std::hex << std::setw(8) << std::setfill('0') << distribution(generator);
+    return oss.str();
 }

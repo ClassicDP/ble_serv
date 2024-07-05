@@ -92,6 +92,7 @@ void UniqueCharacteristicCallbacks::onWrite(NimBLECharacteristic *pCharacteristi
 MessageBase* BleLock::request(MessageBase* requestMessage, const std::string& destAddr, uint32_t timeout) const {
     requestMessage->sourceAddress = macAddress; // Use the stored MAC address
     requestMessage->destinationAddress = destAddr;
+    requestMessage->requestUUID = requestMessage->generateUUID(); // Generate a new UUID for the request
 
     if (xQueueSend(outgoingQueue, &requestMessage, portMAX_DELAY) != pdPASS) {
         Log.error(F("Failed to send request to the outgoing queue"));
@@ -113,9 +114,9 @@ MessageBase* BleLock::request(MessageBase* requestMessage, const std::string& de
             // Create an instance of MessageBase from the received message
             MessageBase* instance = MessageBase::createInstance(*receivedMessage);
 
-            // Check if the source address matches the destination address
-            if (instance->sourceAddress == destAddr) {
-                // Remove the item from the queue after confirming the source address matches
+            // Check if the source address and requestUUID match
+            if (instance->sourceAddress == destAddr && instance->requestUUID == requestMessage->requestUUID) {
+                // Remove the item from the queue after confirming the source address and requestUUID match
                 xQueueReceive(responseQueue, &receivedMessage, 0);
                 delete receivedMessage; // Delete the received message pointer
                 return instance;

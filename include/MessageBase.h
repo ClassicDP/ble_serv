@@ -31,6 +31,7 @@ public:
     std::string sourceAddress;
     std::string destinationAddress;
     MessageType type;
+    std::string requestUUID;
 
     MessageBase() = default;
 
@@ -42,6 +43,8 @@ public:
     static MessageBase* createInstance(const std::string& input);
 
     static void registerConstructor(const MessageType &type, Constructor constructor);
+
+    std::string generateUUID();
 
 protected:
     virtual void serializeExtraFields(json& doc) = 0;
