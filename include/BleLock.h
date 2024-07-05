@@ -78,6 +78,8 @@ private:
     MessageBase *request(MessageBase *requestMessage, const std::string &destAddr, uint32_t timeout) const;
 
     QueueHandle_t getOutgoingQueueHandle() const;
+
+    std::string macAddress;
 };
 
 class PublicCharacteristicCallbacks : public BLECharacteristicCallbacks {
@@ -101,7 +103,6 @@ public:
 private:
     BleLock *lock;
     std::string uuid;
-
 };
 
 class ServerCallbacks : public BLEServerCallbacks {

@@ -89,8 +89,8 @@ void UniqueCharacteristicCallbacks::onWrite(NimBLECharacteristic *pCharacteristi
     }
 }
 
-MessageBase *BleLock::request(MessageBase *requestMessage, const std::string &destAddr, uint32_t timeout) const {
-    requestMessage->sourceAddress = "local_address";
+MessageBase* BleLock::request(MessageBase* requestMessage, const std::string& destAddr, uint32_t timeout) const {
+    requestMessage->sourceAddress = macAddress; // Use the stored MAC address
     requestMessage->destinationAddress = destAddr;
 
     if (xQueueSend(outgoingQueue, &requestMessage, portMAX_DELAY) != pdPASS) {
@@ -98,13 +98,33 @@ MessageBase *BleLock::request(MessageBase *requestMessage, const std::string &de
         return nullptr;
     }
 
-    std::string *receivedMessage;
-    if (xQueueReceive(responseQueue, &receivedMessage, pdMS_TO_TICKS(timeout)) == pdTRUE) {
-        MessageBase *instance = MessageBase::createInstance(*receivedMessage);
-        delete receivedMessage;
-        return instance;
+    uint32_t startTime = xTaskGetTickCount();
+    std::string* receivedMessage;
+
+    while (true) {
+        uint32_t elapsed = xTaskGetTickCount() - startTime;
+        if (elapsed >= pdMS_TO_TICKS(timeout)) {
+            // Timeout reached
+            return nullptr;
+        }
+
+        // Peek at the queue to see if there is a message
+        if (xQueuePeek(responseQueue, &receivedMessage, pdMS_TO_TICKS(timeout) - elapsed) == pdTRUE) {
+            // Create an instance of MessageBase from the received message
+            MessageBase* instance = MessageBase::createInstance(*receivedMessage);
+            // Remove the item from the queue after peeking
+            xQueueReceive(responseQueue, &receivedMessage, 0);
+            delete receivedMessage; // Delete the received message pointer
+
+            // Check if the source address matches the destination address
+            if (instance->sourceAddress == destAddr) {
+                return instance;
+            }
+            delete instance;
+        }
     }
-    return nullptr;
+
+    return nullptr; // This should never be reached, but it's here to satisfy the compiler
 }
 
 
@@ -142,6 +162,10 @@ void BleLock::setup() {
     BLEDevice::init(lockName);
     Log.verbose(F("BLEDevice::init completed"));
 
+    // Get the MAC address and store it
+    macAddress = BLEDevice::getAddress().toString();
+    Log.verbose(F("Device MAC address: %s"), macAddress.c_str());
+
     pServer = BLEDevice::createServer();
     if (!pServer) {
         Log.error(F("Failed to create BLE server"));
@@ -160,7 +184,7 @@ void BleLock::setup() {
     Log.verbose(F("Service created"));
 
     pPublicCharacteristic = pService->createCharacteristic(
-            BLEUUID((uint16_t) 0x1234), // Example UUID
+            BLEUUID((uint16_t)0x1234), // Example UUID
             NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE
     );
     if (!pPublicCharacteristic) {
@@ -181,9 +205,9 @@ void BleLock::setup() {
         return;
     }
     pAdvertising->addServiceUUID("ABCD");
-    pAdvertising->addServiceUUID(pService->getUUID());  // Advertise the service UUID
+    pAdvertising->addServiceUUID(pService->getUUID()); // Advertise the service UUID
     for (const auto &pair : uniqueCharacteristics) {
-        pAdvertising->addServiceUUID(pair.first);  // Advertise each characteristic UUID
+        pAdvertising->addServiceUUID(pair.first); // Advertise each characteristic UUID
     }
     Log.verbose(F("Advertising started"));
     pAdvertising->start();
@@ -196,7 +220,7 @@ void BleLock::setup() {
     Log.verbose(F("OutgoingMessageTask created"));
 
     // Create the JSON parsing queue
-    jsonParsingQueue = xQueueCreate(10, sizeof(std::string*));
+    jsonParsingQueue = xQueueCreate(10, sizeof(std::string *));
     if (jsonParsingQueue == nullptr) {
         Log.error(F("Failed to create JSON parsing queue"));
         return;
@@ -208,6 +232,7 @@ void BleLock::setup() {
 
     loadCharacteristicsFromMemory();
 }
+
 
 QueueHandle_t BleLock::getOutgoingQueueHandle() const {
     return outgoingQueue;
