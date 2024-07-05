@@ -545,6 +545,9 @@ void BleLock::startService() {
 
                     if (responseMessage) {
                         Log.verbose(F("Sending response message to outgoing queue"));
+                        responseMessage->destinationAddress = msg->sourceAddress;
+                        responseMessage->sourceAddress = msg->destinationAddress;
+                        responseMessage->requestUUID = msg->requestUUID;
                         if (xQueueSend(bleLock->outgoingQueue, &responseMessage, portMAX_DELAY) != pdPASS) {
                             Log.error(F("Failed to send response message to outgoing queue"));
                             delete responseMessage;
