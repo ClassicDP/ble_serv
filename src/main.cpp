@@ -7,7 +7,7 @@
 #include "esp_bt.h"
 #include "ArduinoLog.h"
 #include "SecureConnection.h"
-
+#define USE_SERIAL true
 // Создаем глобальный объект SecureConnection
 SecureConnection secureConnection;
 
@@ -114,9 +114,12 @@ void setup2() {
 }
 
 void setup() {
-    Serial.begin(115200);
-    while (!Serial);
-
+    if (USE_SERIAL) {
+        Serial.begin(115200);
+        while (!Serial) {
+            ; // Wait for Serial to be available
+        }
+    }
     Log.begin(LOG_LEVEL_VERBOSE, &Serial);
     Log.setPrefix(&logPrefix);
     Log.setSuffix(&logSuffix);
