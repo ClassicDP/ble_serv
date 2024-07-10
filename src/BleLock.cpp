@@ -1,6 +1,5 @@
 #include "BleLock.h"
 
-
 // Callbacks Implementation
 PublicCharacteristicCallbacks::PublicCharacteristicCallbacks(BleLock *lock) : lock(lock) {}
 
@@ -36,9 +35,24 @@ void printCharacteristics(NimBLEService *pService) {
         Serial.println();
     }
 }
-SemaphoreHandle_t logMutex = xSemaphoreCreateMutex();
+
+SemaphoreHandle_t logMutex = nullptr;
+
+void initializeLogMutex() {
+    if (logMutex == nullptr) {
+        logMutex = xSemaphoreCreateMutex();
+        if (logMutex == nullptr) {
+            Serial.println(F("Failed to create log mutex"));
+        }
+    }
+}
+
 void logColor(LColor color, const __FlashStringHelper *format, ...) {
     std::string colorCode;
+    if (logMutex == nullptr) {
+        Serial.println(F("Log mutex is not initialized"));
+        initializeLogMutex();
+    }
 
     switch (color) {
         case LColor::Reset:
@@ -86,6 +100,14 @@ void logColor(LColor color, const __FlashStringHelper *format, ...) {
     xSemaphoreGive(logMutex);
 }
 
+int lastMemoryLog = 0;
+
+void logMemory(const std::string &prefix = "") {
+    int currentMemory = esp_get_free_heap_size();
+    int diff = currentMemory - lastMemoryLog;
+    logColor(LColor::Yellow, F("%s Current free heap memory: %d bytes, change: %d bytes"), prefix.c_str(), currentMemory, diff);
+    lastMemoryLog = currentMemory;
+}
 
 UniqueCharacteristicCallbacks::UniqueCharacteristicCallbacks(BleLock *lock, std::string uuid)
         : lock(lock), uuid(std::move(uuid)) {}
@@ -93,10 +115,10 @@ UniqueCharacteristicCallbacks::UniqueCharacteristicCallbacks(BleLock *lock, std:
 void UniqueCharacteristicCallbacks::onWrite(NimBLECharacteristic *pCharacteristic, ble_gap_conn_desc *desc) {
     logColor(LColor::Yellow, F("UniqueCharacteristicCallbacks::onWrite called from: %s"),
              NimBLEAddress(desc->peer_ota_addr).toString().c_str());
-    logColor(LColor::Green, F("OnWrite begin Free heap memory :  %d bytes"), esp_get_free_heap_size());
+    logMemory("onWrite");
     {
         std::string receivedMessage = pCharacteristic->getValue();
-        Log.verbose(F("Received message: %s"), receivedMessage.c_str());
+        logColor(LColor::LightBlue, F("Received message: %s"), receivedMessage.c_str());
 
         // Allocate memory for the received message and copy the string
         auto *receivedMessageStrAndMac = new std::tuple{new std::string(receivedMessage),
@@ -104,16 +126,14 @@ void UniqueCharacteristicCallbacks::onWrite(NimBLECharacteristic *pCharacteristi
 
         // Send the message to the JSON parsing queue
         if (xQueueSend(lock->incomingQueue, &receivedMessageStrAndMac, portMAX_DELAY) != pdPASS) {
-            Log.error(F("Failed to send message to JSON parsing queue"));
+            logColor(LColor::Red, F("Failed to send message to JSON parsing queue"));
             delete std::get<0>(*receivedMessageStrAndMac); // Delete the received message string
             delete std::get<1>(*receivedMessageStrAndMac); // Delete the MAC address string
             delete receivedMessageStrAndMac; // Delete the tuple itself
         }
     }
-    logColor(LColor::Green, F("onWrite end Free heap memory :  %d bytes"), esp_get_free_heap_size());
-
+    logMemory("onWrite");
 }
-
 
 MessageBase *BleLock::request(MessageBase *requestMessage, const std::string &destAddr, uint32_t timeout) const {
     requestMessage->sourceAddress = macAddress; // Use the stored MAC address
@@ -121,7 +141,7 @@ MessageBase *BleLock::request(MessageBase *requestMessage, const std::string &de
     requestMessage->requestUUID = requestMessage->generateUUID(); // Generate a new UUID for the request
 
     if (xQueueSend(outgoingQueue, &requestMessage, portMAX_DELAY) != pdPASS) {
-        Log.error(F("Failed to send request to the outgoing queue"));
+        logColor(LColor::Red, F("Failed to send request to the outgoing queue"));
         return nullptr;
     }
 
@@ -154,81 +174,79 @@ MessageBase *BleLock::request(MessageBase *requestMessage, const std::string &de
     return nullptr; // This should never be reached, but it's here to satisfy the compiler
 }
 
-
 ServerCallbacks::ServerCallbacks(BleLock *lock) : lock(lock) {}
 
 void ServerCallbacks::onConnect(NimBLEServer *pServer, ble_gap_conn_desc *desc) {
-
     std::string mac = NimBLEAddress(desc->peer_ota_addr).toString();
-    Log.verbose(F("Device connected (mac=%s)"), mac.c_str());
+    logColor(LColor::LightBlue, F("Device connected (mac=%s)"), mac.c_str());
 
     printCharacteristics(pServer->getServiceByUUID("ABCD"));
 }
 
 void ServerCallbacks::onDisconnect(NimBLEServer *pServer, ble_gap_conn_desc *desc) {
     std::string mac = NimBLEAddress(desc->peer_ota_addr).toString();
-    Log.verbose(F("Device disconnected (mac=%s)"), mac.c_str());
+    logColor(LColor::LightBlue, F("Device disconnected (mac=%s)"), mac.c_str());
 }
 
 BleLock::BleLock(std::string lockName)
         : lockName(std::move(lockName)), pServer(nullptr), pService(nullptr), pPublicCharacteristic(nullptr),
           autoincrement(0) {
     memoryFilename = "/ble_lock_memory.json";
-    Log.verbose(F("xQueueCreate "));
+    logColor(LColor::LightBlue, F("xQueueCreate "));
     characteristicCreationQueue = xQueueCreate(10, sizeof(CreateCharacteristicCmd *)); // Queue to hold char* pointers
     outgoingQueue = xQueueCreate(10, sizeof(MessageBase *));
     responseQueue = xQueueCreate(10, sizeof(std::string *));
-    Log.verbose(F("initializeMutex "));
+    logColor(LColor::LightBlue, F("initializeMutex "));
     initializeMutex();
-    Log.verbose(F("done "));
+    logColor(LColor::LightBlue, F("done "));
 }
 
 void BleLock::setup() {
-    Log.verbose(F("Starting BLE setup..."));
+    logColor(LColor::LightBlue, F("Starting BLE setup..."));
 
     BLEDevice::init(lockName);
-    Log.verbose(F("BLEDevice::init completed"));
+    logColor(LColor::LightBlue, F("BLEDevice::init completed"));
 
     // Get the MAC address and store it
     macAddress = BLEDevice::getAddress().toString();
-    Log.verbose(F("Device MAC address: %s"), macAddress.c_str());
+    logColor(LColor::LightBlue, F("Device MAC address: %s"), macAddress.c_str());
 
     pServer = BLEDevice::createServer();
     if (!pServer) {
-        Log.error(F("Failed to create BLE server"));
+        logColor(LColor::Red, F("Failed to create BLE server"));
         return;
     }
-    Log.verbose(F("BLE server created"));
+    logColor(LColor::LightBlue, F("BLE server created"));
 
     pServer->setCallbacks(new ServerCallbacks(this));
-    Log.verbose(F("Server callbacks set"));
+    logColor(LColor::LightBlue, F("Server callbacks set"));
 
     pService = pServer->createService("ABCD");
     if (!pService) {
-        Log.error(F("Failed to create service"));
+        logColor(LColor::Red, F("Failed to create service"));
         return;
     }
-    Log.verbose(F("Service created"));
+    logColor(LColor::LightBlue, F("Service created"));
 
     pPublicCharacteristic = pService->createCharacteristic(
             BLEUUID((uint16_t) 0x1234), // Example UUID
             NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE
     );
     if (!pPublicCharacteristic) {
-        Log.error(F("Failed to create public characteristic"));
+        logColor(LColor::Red, F("Failed to create public characteristic"));
         return;
     }
-    Log.verbose(F("Public characteristic created"));
+    logColor(LColor::LightBlue, F("Public characteristic created"));
 
     pPublicCharacteristic->setCallbacks(new PublicCharacteristicCallbacks(this));
-    Log.verbose(F("Public characteristic callbacks set"));
+    logColor(LColor::LightBlue, F("Public characteristic callbacks set"));
 
     pService->start();
-    Log.verbose(F("Service started"));
+    logColor(LColor::LightBlue, F("Service started"));
 
     BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
     if (!pAdvertising) {
-        Log.error(F("Failed to get advertising"));
+        logColor(LColor::Red, F("Failed to get advertising"));
         return;
     }
     pAdvertising->addServiceUUID("ABCD");
@@ -236,30 +254,29 @@ void BleLock::setup() {
     for (const auto &pair: uniqueCharacteristics) {
         pAdvertising->addServiceUUID(pair.first); // Advertise each characteristic UUID
     }
-    Log.verbose(F("Advertising started"));
+    logColor(LColor::LightBlue, F("Advertising started"));
     pAdvertising->start();
 
-    Log.verbose(F("BLE setup complete"));
+    logColor(LColor::LightBlue, F("BLE setup complete"));
 
     xTaskCreate(characteristicCreationTask, "CharacteristicCreationTask", 8192, this, 1, nullptr);
-    Log.verbose(F("CharacteristicCreationTask created"));
+    logColor(LColor::LightBlue, F("CharacteristicCreationTask created"));
     xTaskCreate(outgoingMessageTask, "OutgoingMessageTask", 8192, this, 1, nullptr);
-    Log.verbose(F("OutgoingMessageTask created"));
+    logColor(LColor::LightBlue, F("OutgoingMessageTask created"));
 
     // Create the JSON parsing queue
     incomingQueue = xQueueCreate(10, sizeof(std::string *));
     if (incomingQueue == nullptr) {
-        Log.error(F("Failed to create JSON parsing queue"));
+        logColor(LColor::Red, F("Failed to create JSON parsing queue"));
         return;
     }
 
     // Create the JSON parsing task
     xTaskCreate(parsingIncomingTask, "JsonParsingTask", 8192, this, 1, nullptr);
-    Log.verbose(F("JsonParsingTask created"));
+    logColor(LColor::LightBlue, F("JsonParsingTask created"));
 
     loadCharacteristicsFromMemory();
 }
-
 
 QueueHandle_t BleLock::getOutgoingQueueHandle() const {
     return outgoingQueue;
@@ -268,7 +285,7 @@ QueueHandle_t BleLock::getOutgoingQueueHandle() const {
 void BleLock::initializeMutex() {
     bleMutex = xSemaphoreCreateMutex();
     if (bleMutex == nullptr) {
-        Log.error(F("Failed to create the mutex"));
+        logColor(LColor::Red, F("Failed to create the mutex"));
     }
 }
 
@@ -293,55 +310,55 @@ void BleLock::handlePublicCharacteristicRead(NimBLECharacteristic *pCharacterist
         logColor(LColor::Green, F("Device already paired, provided existing UUID: %s"), existingUUID.c_str());
         auto cmd = new CreateCharacteristicCmd{existingUUID, pCharacteristic};
         if (xQueueSend(characteristicCreationQueue, &cmd, portMAX_DELAY) != pdPASS) {
-            Log.error(F("Failed to send UUID to characteristicCreationQueue"));
+            logColor(LColor::Red, F("Failed to send UUID to characteristicCreationQueue"));
             delete cmd;
         }
         return;
     }
 
     std::string newUUID = generateUUID();
-    Log.verbose(F("Generated new UUID: %s"), newUUID.c_str());
+    logColor(LColor::LightBlue, F("Generated new UUID: %s"), newUUID.c_str());
     pCharacteristic->setValue(newUUID);
     awaitingKeys.insert(newUUID);
     pairedDevices[mac] = newUUID;
     resumeAdvertising();
-    Log.verbose(F(" - resumeAdvertising"));
+    logColor(LColor::LightBlue, F(" - resumeAdvertising"));
     auto cmd = new CreateCharacteristicCmd{newUUID, pCharacteristic};
     if (xQueueSend(characteristicCreationQueue, &cmd, portMAX_DELAY) != pdPASS) {
-        Log.error(F("Failed to send UUID to characteristicCreationQueue"));
+        logColor(LColor::Red, F("Failed to send UUID to characteristicCreationQueue"));
         delete cmd;
     }
 }
 
 void BleLock::loadCharacteristicsFromMemory() {
-    Log.verbose(F("Attempting to mount SPIFFS..."));
+    logColor(LColor::LightBlue, F("Attempting to mount SPIFFS..."));
 
     if (SPIFFS.begin(true)) {
-        Log.verbose(F("SPIFFS mounted successfully."));
+        logColor(LColor::LightBlue, F("SPIFFS mounted successfully."));
         File file = SPIFFS.open(memoryFilename.c_str(), FILE_READ);
         if (file) {
-            Log.verbose(F("File opened successfully. Parsing JSON..."));
+            logColor(LColor::LightBlue, F("File opened successfully. Parsing JSON..."));
 
             json doc;
             try {
                 doc = json::parse(file.readString().c_str());
             } catch (json::parse_error &e) {
-                Log.error(F("Failed to parse JSON: %s"), e.what());
+                logColor(LColor::Red, F("Failed to parse JSON: %s"), e.what());
                 file.close();
                 return;
             }
 
             autoincrement = doc.value("autoincrement", 0);
-            Log.verbose(F("Autoincrement loaded: %d"), autoincrement);
+            logColor(LColor::LightBlue, F("Autoincrement loaded: %d"), autoincrement);
 
             json characteristics = doc["characteristics"];
             for (auto &kv: characteristics.items()) {
                 const std::string &uuid = kv.key();
                 bool confirmed = kv.value().get<bool>();
-                Log.verbose(F("Loading characteristic with UUID: %s, confirmed: %d"), uuid.c_str(), confirmed);
+                logColor(LColor::LightBlue, F("Loading characteristic with UUID: %s, confirmed: %d"), uuid.c_str(), confirmed);
 
                 if (!pService) {
-                    Log.error(F("pService is null. Cannot create characteristic."));
+                    logColor(LColor::Red, F("pService is null. Cannot create characteristic."));
                     continue;
                 }
 
@@ -351,7 +368,7 @@ void BleLock::loadCharacteristicsFromMemory() {
                 );
 
                 if (!characteristic) {
-                    Log.error(F("Failed to create characteristic with UUID: %s"), uuid.c_str());
+                    logColor(LColor::Red, F("Failed to create characteristic with UUID: %s"), uuid.c_str());
                     continue;
                 }
 
@@ -365,25 +382,25 @@ void BleLock::loadCharacteristicsFromMemory() {
                 const std::string &mac = kv.key();
                 std::string uuid = kv.value();
                 pairedDevices[mac] = uuid;
-                Log.verbose(F("Loaded paired device with MAC: %s, UUID: %s"), mac.c_str(), uuid.c_str());
+                logColor(LColor::LightBlue, F("Loaded paired device with MAC: %s, UUID: %s"), mac.c_str(), uuid.c_str());
             }
 
             file.close();
-            Log.verbose(F("All characteristics and paired devices loaded successfully."));
+            logColor(LColor::LightBlue, F("All characteristics and paired devices loaded successfully."));
         } else {
-            Log.error(F("Failed to open file. File may not exist."));
+            logColor(LColor::Red, F("Failed to open file. File may not exist."));
         }
     } else {
-        Log.error(F("SPIFFS mount failed, attempting to format..."));
+        logColor(LColor::Red, F("SPIFFS mount failed, attempting to format..."));
         if (SPIFFS.format()) {
-            Log.verbose(F("SPIFFS formatted successfully."));
+            logColor(LColor::LightBlue, F("SPIFFS formatted successfully."));
             if (SPIFFS.begin()) {
-                Log.verbose(F("SPIFFS mounted successfully after formatting."));
+                logColor(LColor::LightBlue, F("SPIFFS mounted successfully after formatting."));
             } else {
-                Log.error(F("Failed to mount SPIFFS after formatting."));
+                logColor(LColor::Red, F("Failed to mount SPIFFS after formatting."));
             }
         } else {
-            Log.error(F("SPIFFS formatting failed."));
+            logColor(LColor::Red, F("SPIFFS formatting failed."));
         }
     }
 }
@@ -409,47 +426,60 @@ void BleLock::saveCharacteristicsToMemory() {
     File file = SPIFFS.open(memoryFilename.c_str(), FILE_WRITE);
     if (file) {
         file.print(doc.dump().c_str());
-        Log.verbose(F("saving.. %s"), doc.dump().c_str());
+        logColor(LColor::LightBlue, F("saving.. %s"), doc.dump().c_str());
         file.close();
     } else {
-        Log.error(F("Failed to open file for writing."));
+        logColor(LColor::Red, F("Failed to open file for writing."));
     }
 }
 
 void BleLock::resumeAdvertising() {
-    Log.verbose(F("Attempting to resume advertising..."));
-
+    logColor(LColor::LightBlue, F("Attempting to clear and restart advertising..."));
     NimBLEAdvertising *pAdvertising = pServer->getAdvertising();
 
-    // Очистите рекламные данные и добавьте сервисы
-    pAdvertising->reset();
-    pAdvertising->addServiceUUID("ABCD");
-
-    for (const auto &pair: uniqueCharacteristics) {
-        Log.verbose(F("Renewing advertising for %s"), pair.first.c_str());
-        pAdvertising->addServiceUUID(pair.first);  // Рекламируйте каждый UUID характеристики
+    if (!pAdvertising) {
+        logColor(LColor::Red, F("Failed to get advertising object"));
+        return;
     }
 
+    if (pAdvertising->isAdvertising()) {
+        logColor(LColor::Yellow, F("Advertising is currently active. Stopping..."));
+        pAdvertising->stop();
+    }
+
+//    logColor(LColor::LightBlue, F("Resetting advertising data..."));
+//    pAdvertising->reset();
+//
+//
+//
+//    pAdvertising->addServiceUUID("ABCD");
+//    for (const auto &pair : uniqueCharacteristics) {
+//        logColor(LColor::LightBlue, F("Adding UUID %s to new advertising data"), pair.first.c_str());
+//        pAdvertising->addServiceUUID(pair.first);
+//    }
+
     if (pAdvertising->start()) {
-        Log.verbose(F("Advertising resumed"));
+        logColor(LColor::LightBlue, F("Advertising successfully restarted"));
     } else {
-        Log.error(F("Failed to resume advertising"));
+        logColor(LColor::Red, F("Failed to restart advertising"));
     }
 }
 
+
+
 void BleLock::stopService() {
-    Log.verbose(F("Attempting to stop Advertising..."));
+    logColor(LColor::LightBlue, F("Attempting to stop Advertising..."));
     pServer->stopAdvertising();
-    Log.verbose(F("Advertising stopped"));
+    logColor(LColor::LightBlue, F("Advertising stopped"));
 }
 
 void BleLock::startService() {
-    Log.verbose(F("Attempting to start service..."));
+    logColor(LColor::LightBlue, F("Attempting to start service..."));
     pService->start();
     NimBLEAdvertising *pAdvertising = pServer->getAdvertising();
-    Log.verbose(F("Attempting to start Advertising..."));
+    logColor(LColor::LightBlue, F("Attempting to start Advertising..."));
     pAdvertising->start();
-    Log.verbose(F("Each started"));
+    logColor(LColor::LightBlue, F("Each started"));
 }
 
 [[noreturn]] void BleLock::characteristicCreationTask(void *pvParameter) {
@@ -460,93 +490,103 @@ void BleLock::startService() {
         logColor(LColor::Green, F("characteristicCreationTask: Waiting to receive UUID from queue..."));
 
         if (xQueueReceive(bleLock->characteristicCreationQueue, &cmd, portMAX_DELAY) == pdTRUE) {
-            // Convert received char* to std::string
             std::string uuidStr(cmd->uuid);
             logColor(LColor::Green, F("BleLock::characteristicCreationTask uuid to create: %s"), uuidStr.c_str());
 
-            // Lock the mutex for service operations
-            Log.verbose(F("characteristicCreationTask: Waiting for Mutex"));
+            logMemory("characteristicCreationTask: Before waiting for Mutex");
+
+            logColor(LColor::LightBlue, F("characteristicCreationTask: Waiting for Mutex"));
             xSemaphoreTake(bleLock->bleMutex, portMAX_DELAY);
-            Log.verbose(F("characteristicCreationTask: Mutex lock"));
+            logColor(LColor::LightBlue, F("characteristicCreationTask: Mutex lock"));
+
+            logMemory("characteristicCreationTask: After Mutex lock, before createCharacteristic");
 
             NimBLECharacteristic *newCharacteristic = bleLock->pService->createCharacteristic(
                     NimBLEUUID::fromString(uuidStr),
                     NIMBLE_PROPERTY::NOTIFY | NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE
             );
-            Log.verbose(F(" - createCharacteristic"));
+            logColor(LColor::LightBlue, F(" - createCharacteristic"));
             printCharacteristics(bleLock->pService);
 
             newCharacteristic->setCallbacks(new UniqueCharacteristicCallbacks(bleLock, uuidStr));
-            Log.verbose(F(" - setCallbacks"));
+            logColor(LColor::LightBlue, F(" - setCallbacks"));
 
             bleLock->uniqueCharacteristics[uuidStr] = newCharacteristic;
             bleLock->confirmedCharacteristics[uuidStr] = false;
 
-            // Free the allocated memory
-            Log.verbose(F(" - uuid memory freed"));
+            logColor(LColor::LightBlue, F(" - uuid memory freed"));
 
             bleLock->saveCharacteristicsToMemory();
-            Log.verbose(F(" - saveCharacteristicsToMemory"));
+            logColor(LColor::LightBlue, F(" - saveCharacteristicsToMemory"));
 
             bleLock->resumeAdvertising();
 
-            // Unlock the mutex for service operations
             xSemaphoreGive(bleLock->bleMutex);
-            Log.verbose(F("characteristicCreationTask: Mutex unlock"));
+            logColor(LColor::LightBlue, F("characteristicCreationTask: Mutex unlock"));
+
+            logMemory("characteristicCreationTask: After characteristic creation");
+
             delete cmd;
         }
     }
 }
-
 [[noreturn]] void BleLock::outgoingMessageTask(void *pvParameter) {
     auto *bleLock = static_cast<BleLock *>(pvParameter);
     MessageBase *responseMessage;
 
-    Log.verbose(F("Starting outgoingMessageTask..."));
+    logColor(LColor::LightBlue, F("Starting outgoingMessageTask..."));
 
     while (true) {
-        Log.verbose(F("outgoingMessageTask: Waiting to receive message from queue..."));
+        logColor(LColor::LightBlue, F("outgoingMessageTask: Waiting to receive message from queue..."));
 
         if (xQueueReceive(bleLock->outgoingQueue, &responseMessage, portMAX_DELAY) == pdTRUE) {
-            logColor(LColor::Green, F("Outgoing queue begin Free heap memory :  %d bytes"), esp_get_free_heap_size());
+            logMemory("outgoingMessageTask: Before processing message");
 
-            Log.verbose(F("Message received from queue"));
+            logColor(LColor::LightBlue, F("Message received from queue"));
 
-            Log.verbose(F("BleLock::responseMessageTask msg: %s"), responseMessage->destinationAddress.c_str());
+            logColor(LColor::LightBlue, F("BleLock::responseMessageTask msg: %s"), responseMessage->destinationAddress.c_str());
 
-            Log.verbose(F("outgoingMessageTask: Mutex lock"));
+            logColor(LColor::LightBlue, F("outgoingMessageTask: Mutex lock"));
+
+            xSemaphoreTake(bleLock->bleMutex, portMAX_DELAY); // добавлен вызов xSemaphoreTake
 
             auto it = bleLock->pairedDevices.find(responseMessage->destinationAddress);
             if (it != bleLock->pairedDevices.end()) {
-                Log.verbose(F("Destination address found in uniqueCharacteristics %s"),
-                            responseMessage->destinationAddress.c_str());
+                logColor(LColor::LightBlue, F("Destination address found in uniqueCharacteristics %s"), responseMessage->destinationAddress.c_str());
 
                 auto characteristic = bleLock->uniqueCharacteristics[it->second];
                 std::string serializedMessage = responseMessage->serialize();
-                Log.verbose(F("Serialized message: %s"), serializedMessage.c_str());
+                logColor(LColor::LightBlue, F("Serialized message: %s"), serializedMessage.c_str());
 
+                logMemory("outgoingMessageTask: Before setValue");
                 characteristic->setValue(serializedMessage);
-                Log.verbose(F("Characteristic value set"));
+                logMemory("outgoingMessageTask: After setValue");
 
+                logColor(LColor::LightBlue, F("Characteristic value set"));
+
+                logMemory("outgoingMessageTask: Before notify");
                 characteristic->notify();
-                Log.verbose(F("Characteristic notified"));
+                logMemory("outgoingMessageTask: After notify");
+
+                logColor(LColor::LightBlue, F("Characteristic notified"));
             } else {
-                Log.error(F("Destination address not found in uniqueCharacteristics"));
+                logColor(LColor::Red, F("Destination address not found in uniqueCharacteristics"));
             }
 
             delete responseMessage;
-            Log.verbose(F("Response message deleted"));
+            logColor(LColor::LightBlue, F("Response message deleted"));
 
+            logMemory("outgoingMessageTask: Before resumeAdvertising");
             bleLock->resumeAdvertising();
-            Log.verbose(F("Advertising resumed"));
+            logMemory("outgoingMessageTask: After resumeAdvertising");
+            logColor(LColor::LightBlue, F("Advertising resumed"));
 
-            // Unlock the mutex for advertising and characteristic operations
             xSemaphoreGive(bleLock->bleMutex);
-            Log.verbose(F("outgoingMessageTask: Mutex unlock"));
-            logColor(LColor::Green, F("Outgoing queue end Free heap memory :  %d bytes"), esp_get_free_heap_size());
+            logColor(LColor::LightBlue, F("outgoingMessageTask: Mutex unlock"));
 
+            logMemory("outgoingMessageTask: After processing message");
         } else {
-            Log.error(F("Failed to receive message from queue"));
+            logColor(LColor::Red, F("Failed to receive message from queue"));
         }
     }
 }
@@ -556,56 +596,55 @@ void BleLock::startService() {
     std::tuple<std::string *, std::string *> *receivedMessageStrAndMac;
 
     while (true) {
-        Log.verbose(F("parsingIncomingTask: Waiting to receive message from queue..."));
+        logColor(LColor::LightBlue, F("parsingIncomingTask: Waiting to receive message from queue..."));
 
         if (xQueueReceive(bleLock->incomingQueue, &receivedMessageStrAndMac, portMAX_DELAY) == pdTRUE) {
-            logColor(LColor::Green, F("parsingIncomingTask begin Free heap memory :  %d bytes"), esp_get_free_heap_size());
+            logMemory("parsingIncomingTask: Before parsing message");
             auto receivedMessage = std::get<0>(*receivedMessageStrAndMac);
             auto address = std::get<1>(*receivedMessageStrAndMac);
-            Log.verbose(F("parsingIncomingTask: Received message: %s from mac: %s"), receivedMessage->c_str(),
-                        address->c_str());
+            logColor(LColor::LightBlue, F("parsingIncomingTask: Received message: %s from mac: %s"), receivedMessage->c_str(), address->c_str());
 
             try {
                 auto msg = MessageBase::createInstance(*receivedMessage);
                 if (msg) {
                     msg->sourceAddress = *address;
-                    Log.verbose(F("Received request from: %s "), msg->sourceAddress.c_str());
+                    logColor(LColor::LightBlue, F("Received request from: %s "), msg->sourceAddress.c_str());
 
                     MessageBase *responseMessage = msg->processRequest(bleLock);
 
                     if (responseMessage) {
-                        Log.verbose(F("Sending response message to outgoing queue"));
+                        logColor(LColor::LightBlue, F("Sending response message to outgoing queue"));
                         responseMessage->destinationAddress = msg->sourceAddress;
                         responseMessage->sourceAddress = msg->destinationAddress;
                         responseMessage->requestUUID = msg->requestUUID;
                         if (xQueueSend(bleLock->outgoingQueue, &responseMessage, portMAX_DELAY) != pdPASS) {
-                            Log.error(F("Failed to send response message to outgoing queue"));
+                            logColor(LColor::Red, F("Failed to send response message to outgoing queue"));
                             delete responseMessage;
                         }
                     } else {
                         auto responseMessageStr = new std::string(*receivedMessage);
-                        Log.verbose(F("Sending response message string to response queue"));
+                        logColor(LColor::LightBlue, F("Sending response message string to response queue"));
                         if (xQueueSend(bleLock->responseQueue, &responseMessageStr, portMAX_DELAY) != pdPASS) {
-                            Log.error(F("Failed to send response message string to response queue"));
+                            logColor(LColor::Red, F("Failed to send response message string to response queue"));
                             delete responseMessageStr;
                         }
                     }
                     delete msg; // Make sure to delete the msg after processing
                 } else {
-                    Log.error(F("Failed to create message instance"));
+                    logColor(LColor::Red, F("Failed to create message instance"));
                 }
             } catch (const json::parse_error &e) {
-                Log.error(F("JSON parse error: %s"), e.what());
+                logColor(LColor::Red, F("JSON parse error: %s"), e.what());
             } catch (const std::exception &e) {
-                Log.error(F("Exception occurred: %s"), e.what());
+                logColor(LColor::Red, F("Exception occurred: %s"), e.what());
             }
-            logColor(LColor::Green, F("parsingIncomingTask Free heap memory :  %d bytes"), esp_get_free_heap_size());
+            logMemory("parsingIncomingTask: After parsing message");
 
             // Free the allocated memory for the received message
             delete receivedMessage;
             delete address;
             delete receivedMessageStrAndMac;
-            logColor(LColor::Green, F("parsingIncomingTask end Free heap memory :  %d bytes"), esp_get_free_heap_size());
+            logMemory("parsingIncomingTask: After freeing memory");
         }
     }
 }

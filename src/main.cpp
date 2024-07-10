@@ -154,7 +154,7 @@ void loop() {
         char temperatureStr[10];
         dtostrf(temperature, 6, 2, temperatureStr);
 
-        Log.notice(F("CPU Temperature: %s °C"), temperatureStr);
+        logColor(LColor::Green, F("CPU Temperature: %s °C"), temperatureStr);
 
         lastTempCheck = millis();
     }
