@@ -4,25 +4,20 @@
 #include <random>
 #include "Arduino.h"
 
-std::unordered_map<std::string, MessageBase::Constructor> MessageBase::constructors;
+std::unordered_map<MessageType, MessageBase::Constructor> MessageBase::constructors;
 
 void MessageBase::registerConstructor(const MessageType& type, Constructor constructor) {
-    constructors[ToString(type)] = std::move(constructor);
+    constructors[type] = std::move(constructor);
 }
 
 MessageBase* MessageBase::createInstance(const std::string& input) {
     Serial.println("Try parsing");
     try {
-        json doc = json::parse(input);
-
-        // Проверка наличия поля "type"
-        if (!doc.contains("type") || !doc["type"].is_string()) {
-            Serial.println("Invalid message: Missing or incorrect 'type' field.");
-            return nullptr;
-        }
-
-        auto it = constructors.find(doc["type"]);
+        MessageBase mBase;
+        mBase.deserialize(input);
+        auto it = constructors.find(mBase.type);
         if (it != constructors.end()) {
+            Serial.println("Constructor found");
             MessageBase* instance = it->second();
             instance->deserialize(input);
             return instance;
@@ -42,11 +37,12 @@ MessageBase* MessageBase::createInstance(const std::string& input) {
     }
 }
 
+
 std::string MessageBase::serialize() {
     json doc;
     doc["sourceAddress"] = sourceAddress;
     doc["destinationAddress"] = destinationAddress;
-    doc["type"] = ToString(type);
+    doc["type"] = type;
     doc["requestUUID"] = requestUUID; // Serialize the request UUID
 
     serializeExtraFields(doc);
@@ -58,7 +54,10 @@ void MessageBase::deserialize(const std::string& input) {
     auto doc = json::parse(input);
     sourceAddress = doc["sourceAddress"];
     destinationAddress = doc["destinationAddress"];
-    type = FromString(doc["type"]);
+//    Serial.println(doc["type"].get<std::string>().c_str());
+    type = doc["type"];
+    if (type==MessageType::reqRegKey)
+        Serial.println("reqReg!!!");
     requestUUID = doc["requestUUID"]; // Deserialize the request UUID
 
     deserializeExtraFields(doc);

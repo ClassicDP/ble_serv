@@ -67,13 +67,13 @@ public:
     BLEService *pService;
     BLECharacteristic *pPublicCharacteristic;
 
-    QueueHandle_t jsonParsingQueue{};
+    QueueHandle_t incomingQueue{};
 private:
     [[noreturn]] [[noreturn]] static void characteristicCreationTask(void *pvParameter);
 
     [[noreturn]] static void outgoingMessageTask(void *pvParameter);
 
-    [[noreturn]] static void jsonParsingTask(void *pvParameter);
+    [[noreturn]] static void parsingIncomingTask(void *pvParameter);
 
     MessageBase *request(MessageBase *requestMessage, const std::string &destAddr, uint32_t timeout) const;
 
@@ -97,7 +97,7 @@ class UniqueCharacteristicCallbacks : public BLECharacteristicCallbacks {
 public:
     UniqueCharacteristicCallbacks(BleLock *lock, std::string uuid);
 
-    void onWrite(BLECharacteristic *pCharacteristic) override;
+    void onWrite(BLECharacteristic *pCharacteristic, ble_gap_conn_desc *desc) override;
 
 
 private:

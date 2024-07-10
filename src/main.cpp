@@ -128,7 +128,7 @@ void setup() {
     Serial.println("After setup2");  // Отладочное сообщение
 
     bool registerResOk = []() {
-        MessageBase::registerConstructor(MessageType::ResOk, []() -> MessageBase * { return new ResOk(); });
+        MessageBase::registerConstructor(MessageType::resOk, []() -> MessageBase * { return new ResOk(); });
         return true;
     }();
     bool registerReqRegKey = []() {

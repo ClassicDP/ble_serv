@@ -11,11 +11,11 @@ void PublicCharacteristicCallbacks::onRead(NimBLECharacteristic *pCharacteristic
     lock->handlePublicCharacteristicRead(pCharacteristic, mac);
 }
 
-void printCharacteristics(NimBLEService* pService) {
+void printCharacteristics(NimBLEService *pService) {
     Serial.println("Listing characteristics:");
 
-    std::vector<NimBLECharacteristic*> characteristics = pService->getCharacteristics();
-    for (auto& characteristic : characteristics) {
+    std::vector<NimBLECharacteristic *> characteristics = pService->getCharacteristics();
+    for (auto &characteristic: characteristics) {
         Serial.print("Characteristic UUID: ");
         Serial.println(characteristic->getUUID().toString().c_str());
 
@@ -37,18 +37,34 @@ void printCharacteristics(NimBLEService* pService) {
     }
 }
 
-void logColor(LColor color, const __FlashStringHelper* format, ...) {
-    const char* colorCode;
+void logColor(LColor color, const __FlashStringHelper *format, ...) {
+    const char *colorCode;
 
     switch (color) {
-        case LColor::Reset: colorCode = "\x1B[0m"; break;
-        case LColor::Red: colorCode = "\x1B[31m"; break;
-        case LColor::LightRed: colorCode = "\x1B[91m"; break;
-        case LColor::Yellow: colorCode = "\x1B[93m"; break;
-        case LColor::LightBlue: colorCode = "\x1B[94m"; break;
-        case LColor::Green: colorCode = "\x1B[92m"; break;
-        case LColor::LightCyan: colorCode = "\x1B[96m"; break;
-        default: colorCode = "\x1B[0m"; break;
+        case LColor::Reset:
+            colorCode = "\x1B[0m";
+            break;
+        case LColor::Red:
+            colorCode = "\x1B[31m";
+            break;
+        case LColor::LightRed:
+            colorCode = "\x1B[91m";
+            break;
+        case LColor::Yellow:
+            colorCode = "\x1B[93m";
+            break;
+        case LColor::LightBlue:
+            colorCode = "\x1B[94m";
+            break;
+        case LColor::Green:
+            colorCode = "\x1B[92m";
+            break;
+        case LColor::LightCyan:
+            colorCode = "\x1B[96m";
+            break;
+        default:
+            colorCode = "\x1B[0m";
+            break;
     }
 
     Serial.print("\n");  // Add newline at the beginning
@@ -60,7 +76,7 @@ void logColor(LColor color, const __FlashStringHelper* format, ...) {
     char buffer[256];
     va_list args;
     va_start(args, format);
-    vsnprintf_P(buffer, sizeof(buffer), reinterpret_cast<const char*>(format), args);
+    vsnprintf_P(buffer, sizeof(buffer), reinterpret_cast<const char *>(format), args);
     va_end(args);
 
     Serial.print(buffer);
@@ -69,27 +85,28 @@ void logColor(LColor color, const __FlashStringHelper* format, ...) {
 }
 
 
-
 UniqueCharacteristicCallbacks::UniqueCharacteristicCallbacks(BleLock *lock, std::string uuid)
         : lock(lock), uuid(std::move(uuid)) {}
 
-void UniqueCharacteristicCallbacks::onWrite(NimBLECharacteristic *pCharacteristic) {
-    logColor(LColor::Yellow, F("UniqueCharacteristicCallbacks::onWrite called"));
+void UniqueCharacteristicCallbacks::onWrite(NimBLECharacteristic *pCharacteristic, ble_gap_conn_desc *desc) {
+    logColor(LColor::Yellow, F("UniqueCharacteristicCallbacks::onWrite called from: %s"),
+             NimBLEAddress(desc->peer_ota_addr).toString().c_str());
 
     std::string receivedMessage = pCharacteristic->getValue();
     Log.verbose(F("Received message: %s"), receivedMessage.c_str());
 
     // Allocate memory for the received message and copy the string
-    auto *receivedMessageStr = new std::string(receivedMessage);
+    auto *receivedMessageStrAndMac = new std::tuple{new std::string(receivedMessage),
+                                                    new std::string(NimBLEAddress(desc->peer_ota_addr).toString())};
 
     // Send the message to the JSON parsing queue
-    if (xQueueSend(lock->jsonParsingQueue, &receivedMessageStr, portMAX_DELAY) != pdPASS) {
+    if (xQueueSend(lock->incomingQueue, &receivedMessageStrAndMac, portMAX_DELAY) != pdPASS) {
         Log.error(F("Failed to send message to JSON parsing queue"));
-        delete receivedMessageStr;
+        delete receivedMessageStrAndMac;
     }
 }
 
-MessageBase* BleLock::request(MessageBase* requestMessage, const std::string& destAddr, uint32_t timeout) const {
+MessageBase *BleLock::request(MessageBase *requestMessage, const std::string &destAddr, uint32_t timeout) const {
     requestMessage->sourceAddress = macAddress; // Use the stored MAC address
     requestMessage->destinationAddress = destAddr;
     requestMessage->requestUUID = requestMessage->generateUUID(); // Generate a new UUID for the request
@@ -100,7 +117,7 @@ MessageBase* BleLock::request(MessageBase* requestMessage, const std::string& de
     }
 
     uint32_t startTime = xTaskGetTickCount();
-    std::string* receivedMessage;
+    std::string *receivedMessage;
 
     while (true) {
         uint32_t elapsed = xTaskGetTickCount() - startTime;
@@ -112,7 +129,7 @@ MessageBase* BleLock::request(MessageBase* requestMessage, const std::string& de
         // Peek at the queue to see if there is a message
         if (xQueuePeek(responseQueue, &receivedMessage, pdMS_TO_TICKS(timeout) - elapsed) == pdTRUE) {
             // Create an instance of MessageBase from the received message
-            MessageBase* instance = MessageBase::createInstance(*receivedMessage);
+            MessageBase *instance = MessageBase::createInstance(*receivedMessage);
 
             // Check if the source address and requestUUID match
             if (instance->sourceAddress == destAddr && instance->requestUUID == requestMessage->requestUUID) {
@@ -131,7 +148,7 @@ MessageBase* BleLock::request(MessageBase* requestMessage, const std::string& de
 
 ServerCallbacks::ServerCallbacks(BleLock *lock) : lock(lock) {}
 
-void ServerCallbacks::onConnect(NimBLEServer *pServer, ble_gap_conn_desc* desc) {
+void ServerCallbacks::onConnect(NimBLEServer *pServer, ble_gap_conn_desc *desc) {
 
     std::string mac = NimBLEAddress(desc->peer_ota_addr).toString();
     Log.verbose(F("Device connected (mac=%s)"), mac.c_str());
@@ -139,7 +156,7 @@ void ServerCallbacks::onConnect(NimBLEServer *pServer, ble_gap_conn_desc* desc) 
     printCharacteristics(pServer->getServiceByUUID("ABCD"));
 }
 
-void ServerCallbacks::onDisconnect(NimBLEServer *pServer, ble_gap_conn_desc* desc) {
+void ServerCallbacks::onDisconnect(NimBLEServer *pServer, ble_gap_conn_desc *desc) {
     std::string mac = NimBLEAddress(desc->peer_ota_addr).toString();
     Log.verbose(F("Device disconnected (mac=%s)"), mac.c_str());
 }
@@ -185,7 +202,7 @@ void BleLock::setup() {
     Log.verbose(F("Service created"));
 
     pPublicCharacteristic = pService->createCharacteristic(
-            BLEUUID((uint16_t)0x1234), // Example UUID
+            BLEUUID((uint16_t) 0x1234), // Example UUID
             NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE
     );
     if (!pPublicCharacteristic) {
@@ -207,7 +224,7 @@ void BleLock::setup() {
     }
     pAdvertising->addServiceUUID("ABCD");
     pAdvertising->addServiceUUID(pService->getUUID()); // Advertise the service UUID
-    for (const auto &pair : uniqueCharacteristics) {
+    for (const auto &pair: uniqueCharacteristics) {
         pAdvertising->addServiceUUID(pair.first); // Advertise each characteristic UUID
     }
     Log.verbose(F("Advertising started"));
@@ -221,14 +238,14 @@ void BleLock::setup() {
     Log.verbose(F("OutgoingMessageTask created"));
 
     // Create the JSON parsing queue
-    jsonParsingQueue = xQueueCreate(10, sizeof(std::string *));
-    if (jsonParsingQueue == nullptr) {
+    incomingQueue = xQueueCreate(10, sizeof(std::string *));
+    if (incomingQueue == nullptr) {
         Log.error(F("Failed to create JSON parsing queue"));
         return;
     }
 
     // Create the JSON parsing task
-    xTaskCreate(jsonParsingTask, "JsonParsingTask", 8192, this, 1, nullptr);
+    xTaskCreate(parsingIncomingTask, "JsonParsingTask", 8192, this, 1, nullptr);
     Log.verbose(F("JsonParsingTask created"));
 
     loadCharacteristicsFromMemory();
@@ -258,7 +275,7 @@ std::string BleLock::generateUUID() {
     return {uuid};
 }
 
-void BleLock::handlePublicCharacteristicRead(NimBLECharacteristic *pCharacteristic, const std::string& mac) {
+void BleLock::handlePublicCharacteristicRead(NimBLECharacteristic *pCharacteristic, const std::string &mac) {
     if (pairedDevices.find(mac) != pairedDevices.end()) {
         // If device is already paired, provide existing UUID
         std::string existingUUID = pairedDevices[mac];
@@ -310,7 +327,7 @@ void BleLock::loadCharacteristicsFromMemory() {
 
             json characteristics = doc["characteristics"];
             for (auto &kv: characteristics.items()) {
-                const std::string& uuid = kv.key();
+                const std::string &uuid = kv.key();
                 bool confirmed = kv.value().get<bool>();
                 Log.verbose(F("Loading characteristic with UUID: %s, confirmed: %d"), uuid.c_str(), confirmed);
 
@@ -336,7 +353,7 @@ void BleLock::loadCharacteristicsFromMemory() {
 
             json devices = doc["pairedDevices"];
             for (auto &kv: devices.items()) {
-                const std::string& mac = kv.key();
+                const std::string &mac = kv.key();
                 std::string uuid = kv.value();
                 pairedDevices[mac] = uuid;
                 Log.verbose(F("Loaded paired device with MAC: %s, UUID: %s"), mac.c_str(), uuid.c_str());
@@ -375,7 +392,7 @@ void BleLock::saveCharacteristicsToMemory() {
     doc["characteristics"] = characteristics;
 
     json devices;
-    for (const auto &pair : pairedDevices) {
+    for (const auto &pair: pairedDevices) {
         devices[pair.first] = pair.second;
     }
     doc["pairedDevices"] = devices;
@@ -399,7 +416,7 @@ void BleLock::resumeAdvertising() {
     pAdvertising->reset();
     pAdvertising->addServiceUUID("ABCD");
 
-    for (const auto &pair : uniqueCharacteristics) {
+    for (const auto &pair: uniqueCharacteristics) {
         Log.verbose(F("Renewing advertising for %s"), pair.first.c_str());
         pAdvertising->addServiceUUID(pair.first);  // Рекламируйте каждый UUID характеристики
     }
@@ -484,20 +501,19 @@ void BleLock::startService() {
         if (xQueueReceive(bleLock->outgoingQueue, &responseMessage, portMAX_DELAY) == pdTRUE) {
             Log.verbose(F("Message received from queue"));
 
-            Log.verbose(F("BleLock::responseMessageTask msg: %s %s"), responseMessage->destinationAddress.c_str(),
-                        ToString(responseMessage->type));
+            Log.verbose(F("BleLock::responseMessageTask msg: %s"), responseMessage->destinationAddress.c_str());
 
             // Lock the mutex for advertising and characteristic operations
             Log.verbose(F("outgoingMessageTask: Waiting for Mutex"));
             xSemaphoreTake(bleLock->bleMutex, portMAX_DELAY);
             Log.verbose(F("outgoingMessageTask: Mutex lock"));
 
-            auto it = bleLock->uniqueCharacteristics.find(responseMessage->destinationAddress);
-            if (it != bleLock->uniqueCharacteristics.end()) {
+            auto it = bleLock->pairedDevices.find(responseMessage->destinationAddress);
+            if (it != bleLock->pairedDevices.end()) {
                 Log.verbose(F("Destination address found in uniqueCharacteristics %s"),
                             responseMessage->destinationAddress.c_str());
 
-                NimBLECharacteristic *characteristic = it->second;
+                auto characteristic = bleLock->uniqueCharacteristics[it->second];
                 std::string serializedMessage = responseMessage->serialize();
                 Log.verbose(F("Serialized message: %s"), serializedMessage.c_str());
 
@@ -525,20 +541,24 @@ void BleLock::startService() {
     }
 }
 
-[[noreturn]] void BleLock::jsonParsingTask(void *pvParameter) {
+[[noreturn]] void BleLock::parsingIncomingTask(void *pvParameter) {
     auto *bleLock = static_cast<BleLock *>(pvParameter);
-    std::string *receivedMessageStr;
+    std::tuple<std::string *, std::string *> *receivedMessageStrAndMac;
 
     while (true) {
-        Log.verbose(F("jsonParsingTask: Waiting to receive message from queue..."));
+        Log.verbose(F("parsingIncomingTask: Waiting to receive message from queue..."));
 
-        if (xQueueReceive(bleLock->jsonParsingQueue, &receivedMessageStr, portMAX_DELAY) == pdTRUE) {
-            Log.verbose(F("jsonParsingTask: Received message: %s"), receivedMessageStr->c_str());
+        if (xQueueReceive(bleLock->incomingQueue, &receivedMessageStrAndMac, portMAX_DELAY) == pdTRUE) {
+            auto receivedMessage = std::get<0>(*receivedMessageStrAndMac);
+            auto address = std::get<1>(*receivedMessageStrAndMac);
+            Log.verbose(F("parsingIncomingTask: Received message: %s from mac: %s"), receivedMessage->c_str(),
+                        address->c_str());
 
             try {
-                auto msg = MessageBase::createInstance(*receivedMessageStr);
+                auto msg = MessageBase::createInstance(*receivedMessage);
                 if (msg) {
-                    Log.verbose(F("Received request from: %s with type: %s"), msg->sourceAddress.c_str(), ToString(msg->type));
+                    msg->sourceAddress = *address;
+                    Log.verbose(F("Received request from: %s "), msg->sourceAddress.c_str());
 
                     MessageBase *responseMessage = msg->processRequest(bleLock);
                     delete msg;
@@ -553,7 +573,7 @@ void BleLock::startService() {
                             delete responseMessage;
                         }
                     } else {
-                        auto responseMessageStr = new std::string(*receivedMessageStr);
+                        auto responseMessageStr = new std::string(*receivedMessage);
                         Log.verbose(F("Sending response message string to response queue"));
                         if (xQueueSend(bleLock->responseQueue, &responseMessageStr, portMAX_DELAY) != pdPASS) {
                             Log.error(F("Failed to send response message string to response queue"));
@@ -570,7 +590,9 @@ void BleLock::startService() {
             }
 
             // Free the allocated memory for the received message
-            delete receivedMessageStr;
+            delete receivedMessage;
+            delete address;
+            delete receivedMessageStrAndMac;
         }
     }
 }

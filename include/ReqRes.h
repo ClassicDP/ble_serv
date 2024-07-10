@@ -6,11 +6,11 @@ public:
     bool status{};
 
     ResOk() {
-        type = MessageType::ResOk;
+        type = MessageType::resOk;
     }
 
     explicit ResOk(bool status) : status(status) {
-        type = MessageType::ResOk;
+        type = MessageType::resOk;
     }
 
 protected:
