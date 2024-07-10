@@ -102,9 +102,15 @@ void UniqueCharacteristicCallbacks::onWrite(NimBLECharacteristic *pCharacteristi
     // Send the message to the JSON parsing queue
     if (xQueueSend(lock->incomingQueue, &receivedMessageStrAndMac, portMAX_DELAY) != pdPASS) {
         Log.error(F("Failed to send message to JSON parsing queue"));
-        delete receivedMessageStrAndMac;
+        delete std::get<0>(*receivedMessageStrAndMac); // Delete the received message string
+        delete std::get<1>(*receivedMessageStrAndMac); // Delete the MAC address string
+        delete receivedMessageStrAndMac; // Delete the tuple itself
     }
+    size_t freeHeap = esp_get_free_heap_size();
+    logColor(LColor::Green, F("Free heap memory :  %d bytes"), freeHeap);
+
 }
+
 
 MessageBase *BleLock::request(MessageBase *requestMessage, const std::string &destAddr, uint32_t timeout) const {
     requestMessage->sourceAddress = macAddress; // Use the stored MAC address
@@ -561,7 +567,6 @@ void BleLock::startService() {
                     Log.verbose(F("Received request from: %s "), msg->sourceAddress.c_str());
 
                     MessageBase *responseMessage = msg->processRequest(bleLock);
-                    delete msg;
 
                     if (responseMessage) {
                         Log.verbose(F("Sending response message to outgoing queue"));
@@ -580,6 +585,7 @@ void BleLock::startService() {
                             delete responseMessageStr;
                         }
                     }
+                    delete msg; // Make sure to delete the msg after processing
                 } else {
                     Log.error(F("Failed to create message instance"));
                 }
@@ -593,6 +599,8 @@ void BleLock::startService() {
             delete receivedMessage;
             delete address;
             delete receivedMessageStrAndMac;
+            size_t freeHeap = esp_get_free_heap_size();
+            logColor(LColor::Green, F("Free heap memory :  %d bytes"), freeHeap);
         }
     }
 }
