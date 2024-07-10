@@ -46,7 +46,7 @@ std::string MessageBase::serialize() {
     doc["requestUUID"] = requestUUID; // Serialize the request UUID
 
     serializeExtraFields(doc);
-    return doc.dump();
+    return {doc.dump()};
 }
 
 

@@ -156,8 +156,6 @@ void loop() {
 
         Log.notice(F("CPU Temperature: %s °C"), temperatureStr);
 
-        size_t freeHeap = esp_get_free_heap_size();
-        logColor(LColor::Yellow, F("Free heap memory:  %d bytes"), freeHeap);
         lastTempCheck = millis();
     }
 }

@@ -36,9 +36,9 @@ void printCharacteristics(NimBLEService *pService) {
         Serial.println();
     }
 }
-
+SemaphoreHandle_t logMutex = xSemaphoreCreateMutex();
 void logColor(LColor color, const __FlashStringHelper *format, ...) {
-    const char *colorCode;
+    std::string colorCode;
 
     switch (color) {
         case LColor::Reset:
@@ -66,11 +66,12 @@ void logColor(LColor color, const __FlashStringHelper *format, ...) {
             colorCode = "\x1B[0m";
             break;
     }
+    xSemaphoreTake(logMutex, portMAX_DELAY);
 
     Serial.print("\n");  // Add newline at the beginning
     Serial.print(millis());
     Serial.print("ms: ");
-    Serial.print(colorCode);
+    Serial.print(colorCode.c_str());
 
     // Create a buffer to hold the formatted string
     char buffer[256];
@@ -82,6 +83,7 @@ void logColor(LColor color, const __FlashStringHelper *format, ...) {
     Serial.print(buffer);
     Serial.print("\x1B[0m");  // Reset color
     Serial.println();
+    xSemaphoreGive(logMutex);
 }
 
 
@@ -91,23 +93,24 @@ UniqueCharacteristicCallbacks::UniqueCharacteristicCallbacks(BleLock *lock, std:
 void UniqueCharacteristicCallbacks::onWrite(NimBLECharacteristic *pCharacteristic, ble_gap_conn_desc *desc) {
     logColor(LColor::Yellow, F("UniqueCharacteristicCallbacks::onWrite called from: %s"),
              NimBLEAddress(desc->peer_ota_addr).toString().c_str());
+    logColor(LColor::Green, F("OnWrite begin Free heap memory :  %d bytes"), esp_get_free_heap_size());
+    {
+        std::string receivedMessage = pCharacteristic->getValue();
+        Log.verbose(F("Received message: %s"), receivedMessage.c_str());
 
-    std::string receivedMessage = pCharacteristic->getValue();
-    Log.verbose(F("Received message: %s"), receivedMessage.c_str());
+        // Allocate memory for the received message and copy the string
+        auto *receivedMessageStrAndMac = new std::tuple{new std::string(receivedMessage),
+                                                        new std::string(NimBLEAddress(desc->peer_ota_addr).toString())};
 
-    // Allocate memory for the received message and copy the string
-    auto *receivedMessageStrAndMac = new std::tuple{new std::string(receivedMessage),
-                                                    new std::string(NimBLEAddress(desc->peer_ota_addr).toString())};
-
-    // Send the message to the JSON parsing queue
-    if (xQueueSend(lock->incomingQueue, &receivedMessageStrAndMac, portMAX_DELAY) != pdPASS) {
-        Log.error(F("Failed to send message to JSON parsing queue"));
-        delete std::get<0>(*receivedMessageStrAndMac); // Delete the received message string
-        delete std::get<1>(*receivedMessageStrAndMac); // Delete the MAC address string
-        delete receivedMessageStrAndMac; // Delete the tuple itself
+        // Send the message to the JSON parsing queue
+        if (xQueueSend(lock->incomingQueue, &receivedMessageStrAndMac, portMAX_DELAY) != pdPASS) {
+            Log.error(F("Failed to send message to JSON parsing queue"));
+            delete std::get<0>(*receivedMessageStrAndMac); // Delete the received message string
+            delete std::get<1>(*receivedMessageStrAndMac); // Delete the MAC address string
+            delete receivedMessageStrAndMac; // Delete the tuple itself
+        }
     }
-    size_t freeHeap = esp_get_free_heap_size();
-    logColor(LColor::Green, F("Free heap memory :  %d bytes"), freeHeap);
+    logColor(LColor::Green, F("onWrite end Free heap memory :  %d bytes"), esp_get_free_heap_size());
 
 }
 
@@ -505,13 +508,12 @@ void BleLock::startService() {
         Log.verbose(F("outgoingMessageTask: Waiting to receive message from queue..."));
 
         if (xQueueReceive(bleLock->outgoingQueue, &responseMessage, portMAX_DELAY) == pdTRUE) {
+            logColor(LColor::Green, F("Outgoing queue begin Free heap memory :  %d bytes"), esp_get_free_heap_size());
+
             Log.verbose(F("Message received from queue"));
 
             Log.verbose(F("BleLock::responseMessageTask msg: %s"), responseMessage->destinationAddress.c_str());
 
-            // Lock the mutex for advertising and characteristic operations
-            Log.verbose(F("outgoingMessageTask: Waiting for Mutex"));
-            xSemaphoreTake(bleLock->bleMutex, portMAX_DELAY);
             Log.verbose(F("outgoingMessageTask: Mutex lock"));
 
             auto it = bleLock->pairedDevices.find(responseMessage->destinationAddress);
@@ -541,6 +543,8 @@ void BleLock::startService() {
             // Unlock the mutex for advertising and characteristic operations
             xSemaphoreGive(bleLock->bleMutex);
             Log.verbose(F("outgoingMessageTask: Mutex unlock"));
+            logColor(LColor::Green, F("Outgoing queue end Free heap memory :  %d bytes"), esp_get_free_heap_size());
+
         } else {
             Log.error(F("Failed to receive message from queue"));
         }
@@ -555,6 +559,7 @@ void BleLock::startService() {
         Log.verbose(F("parsingIncomingTask: Waiting to receive message from queue..."));
 
         if (xQueueReceive(bleLock->incomingQueue, &receivedMessageStrAndMac, portMAX_DELAY) == pdTRUE) {
+            logColor(LColor::Green, F("parsingIncomingTask begin Free heap memory :  %d bytes"), esp_get_free_heap_size());
             auto receivedMessage = std::get<0>(*receivedMessageStrAndMac);
             auto address = std::get<1>(*receivedMessageStrAndMac);
             Log.verbose(F("parsingIncomingTask: Received message: %s from mac: %s"), receivedMessage->c_str(),
@@ -594,13 +599,13 @@ void BleLock::startService() {
             } catch (const std::exception &e) {
                 Log.error(F("Exception occurred: %s"), e.what());
             }
+            logColor(LColor::Green, F("parsingIncomingTask Free heap memory :  %d bytes"), esp_get_free_heap_size());
 
             // Free the allocated memory for the received message
             delete receivedMessage;
             delete address;
             delete receivedMessageStrAndMac;
-            size_t freeHeap = esp_get_free_heap_size();
-            logColor(LColor::Green, F("Free heap memory :  %d bytes"), freeHeap);
+            logColor(LColor::Green, F("parsingIncomingTask end Free heap memory :  %d bytes"), esp_get_free_heap_size());
         }
     }
 }
