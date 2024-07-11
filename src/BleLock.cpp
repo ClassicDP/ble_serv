@@ -49,10 +49,8 @@ void initializeLogMutex() {
 
 void logColor(LColor color, const __FlashStringHelper *format, ...) {
     std::string colorCode;
-    if (logMutex == nullptr) {
-        Serial.println(F("Log mutex is not initialized"));
-        initializeLogMutex();
-    }
+    auto time = millis();
+    initializeLogMutex();
 
     switch (color) {
         case LColor::Reset:
@@ -81,9 +79,7 @@ void logColor(LColor color, const __FlashStringHelper *format, ...) {
             break;
     }
     xSemaphoreTake(logMutex, portMAX_DELAY);
-
-    Serial.print("\n");  // Add newline at the beginning
-    Serial.print(millis());
+    Serial.print(time);
     Serial.print("ms: ");
     Serial.print(colorCode.c_str());
 
