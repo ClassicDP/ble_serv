@@ -114,7 +114,7 @@ void UniqueCharacteristicCallbacks::onWrite(NimBLECharacteristic *pCharacteristi
     logMemory("onWrite");
     {
         std::string receivedMessage = pCharacteristic->getValue();
-        logColor(LColor::LightBlue, F("Received message: %s"), receivedMessage.c_str());
+        logColor(LColor::Green, F("Received message: %s"), receivedMessage.c_str());
 
         // Allocate memory for the received message and copy the string
         auto *receivedMessageStrAndMac = new std::tuple{new std::string(receivedMessage),
@@ -496,12 +496,14 @@ void BleLock::startService() {
             logColor(LColor::LightBlue, F("characteristicCreationTask: Mutex lock"));
 
             logMemory("characteristicCreationTask: After Mutex lock, before createCharacteristic");
-
-            NimBLECharacteristic *newCharacteristic = bleLock->pService->createCharacteristic(
-                    NimBLEUUID::fromString(uuidStr),
-                    NIMBLE_PROPERTY::NOTIFY | NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE
-            );
-            logColor(LColor::LightBlue, F(" - createCharacteristic"));
+            auto newCharacteristic = bleLock->pService->getCharacteristic(uuidStr);
+            if (newCharacteristic == nullptr) {
+                newCharacteristic = bleLock->pService->createCharacteristic(
+                        NimBLEUUID::fromString(uuidStr),
+                        NIMBLE_PROPERTY::NOTIFY | NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE
+                );
+                logColor(LColor::LightBlue, F(" - createCharacteristic"));
+            }
             printCharacteristics(bleLock->pService);
 
             newCharacteristic->setCallbacks(new UniqueCharacteristicCallbacks(bleLock, uuidStr));
