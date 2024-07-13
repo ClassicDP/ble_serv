@@ -136,6 +136,8 @@ MessageBase *BleLock::request(MessageBase *requestMessage, const std::string &de
     requestMessage->destinationAddress = destAddr;
     requestMessage->requestUUID = requestMessage->generateUUID(); // Generate a new UUID for the request
 
+    logColor(LColor::Red, F("start request"));
+
     if (xQueueSend(outgoingQueue, &requestMessage, portMAX_DELAY) != pdPASS) {
         logColor(LColor::Red, F("Failed to send request to the outgoing queue"));
         return nullptr;
@@ -148,6 +150,7 @@ MessageBase *BleLock::request(MessageBase *requestMessage, const std::string &de
         uint32_t elapsed = xTaskGetTickCount() - startTime;
         if (elapsed >= pdMS_TO_TICKS(timeout)) {
             // Timeout reached
+            logColor (LColor::Red, F("request timeout reached"));
             return nullptr;
         }
 
@@ -156,13 +159,19 @@ MessageBase *BleLock::request(MessageBase *requestMessage, const std::string &de
             // Create an instance of MessageBase from the received message
             MessageBase *instance = MessageBase::createInstance(*receivedMessage);
 
+            logColor (LColor::Red, F("request answer!: %s"), receivedMessage->c_str());
+
             // Check if the source address and requestUUID match
             if (instance->sourceAddress == destAddr && instance->requestUUID == requestMessage->requestUUID) {
                 // Remove the item from the queue after confirming the source address and requestUUID match
                 xQueueReceive(responseQueue, &receivedMessage, 0);
                 delete receivedMessage; // Delete the received message pointer
+                logColor (LColor::Red, F("RemoveFromQueue"));
                 return instance;
             }
+            else
+                logColor (LColor::Red, F("FAIL RemoveFromQueue"));
+
             delete instance;
         }
     }
@@ -552,14 +561,15 @@ void BleLock::startService() {
             if (it != bleLock->pairedDevices.end()) {
                 logColor(LColor::LightBlue, F("Destination address found in uniqueCharacteristics %s"), responseMessage->destinationAddress.c_str());
 
-                //auto characteristic = bleLock->uniqueCharacteristics[it->second];
+                auto characteristic = bleLock->uniqueCharacteristics[it->second];
                 //auto characteristic = bleLock->pService->getCharacteristic(it->second);
-                auto characteristics = bleLock->pService->getCharacteristics(it->second);
+                //auto characteristics = bleLock->pService->getCharacteristics(it->second);
 
-                for (int nChar =0; nChar<characteristics.size(); nChar++)
-                {
-                    auto characteristic = characteristics[nChar];
-                logColor(LColor::Green, F("characteristics number: %d"),characteristics.size());
+                //for (int nChar =0; nChar<characteristics.size(); nChar++)
+                //{
+                //    auto characteristic = characteristics[nChar];
+                
+                //logColor(LColor::Green, F("characteristics number: %d"),characteristics.size());
 
 
                 logColor(LColor::LightBlue, F("write to characteristic: %s"),characteristic->getUUID().toString().c_str());
@@ -569,12 +579,12 @@ void BleLock::startService() {
                 logMemory("outgoingMessageTask: Before setValue");
                 characteristic->setValue(serializedMessage);
                 size_t nSubs = characteristic->getSubscribedCount();
-                std::string newVal = characteristic->getValue();
+                //std::string newVal = characteristic->getValue();
                 logMemory("outgoingMessageTask: After setValue Subscribers");
 
                 logColor(LColor::Yellow, F("Subscribed %d"), nSubs);
-                std::string newValChk = characteristic->getValue();
-                logColor(LColor::Yellow, F("NewValue = %s"), newValChk.c_str());
+                //std::string newValChk = characteristic->getValue();
+                //logColor(LColor::Yellow, F("NewValue = %s"), newValChk.c_str());
 
                 logColor(LColor::LightBlue, F("Characteristic value set"));
 
@@ -583,7 +593,7 @@ void BleLock::startService() {
                 logMemory("outgoingMessageTask: After notify");
 
                 logColor(LColor::LightBlue, F("Characteristic notified"));
-                }//all characteristics!!!!
+                //}//all characteristics!!!!
             } else {
                 logColor(LColor::Red, F("Destination address not found in uniqueCharacteristics"));
             }
