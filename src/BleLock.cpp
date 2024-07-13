@@ -114,7 +114,7 @@ void UniqueCharacteristicCallbacks::onWrite(NimBLECharacteristic *pCharacteristi
     logMemory("onWrite");
     {
         std::string receivedMessage = pCharacteristic->getValue();
-        logColor(LColor::Green, F("Received message: %s"), receivedMessage.c_str());
+        logColor(LColor::LightBlue, F("Received message: %s"), receivedMessage.c_str());
 
         // Allocate memory for the received message and copy the string
         auto *receivedMessageStrAndMac = new std::tuple{new std::string(receivedMessage),
@@ -552,13 +552,29 @@ void BleLock::startService() {
             if (it != bleLock->pairedDevices.end()) {
                 logColor(LColor::LightBlue, F("Destination address found in uniqueCharacteristics %s"), responseMessage->destinationAddress.c_str());
 
-                auto characteristic = bleLock->uniqueCharacteristics[it->second];
+                //auto characteristic = bleLock->uniqueCharacteristics[it->second];
+                //auto characteristic = bleLock->pService->getCharacteristic(it->second);
+                auto characteristics = bleLock->pService->getCharacteristics(it->second);
+
+                for (int nChar =0; nChar<characteristics.size(); nChar++)
+                {
+                    auto characteristic = characteristics[nChar];
+                logColor(LColor::Green, F("characteristics number: %d"),characteristics.size());
+
+
+                logColor(LColor::LightBlue, F("write to characteristic: %s"),characteristic->getUUID().toString().c_str());
                 std::string serializedMessage = responseMessage->serialize();
                 logColor(LColor::LightBlue, F("Serialized message: %s"), serializedMessage.c_str());
 
                 logMemory("outgoingMessageTask: Before setValue");
                 characteristic->setValue(serializedMessage);
-                logMemory("outgoingMessageTask: After setValue");
+                size_t nSubs = characteristic->getSubscribedCount();
+                std::string newVal = characteristic->getValue();
+                logMemory("outgoingMessageTask: After setValue Subscribers");
+
+                logColor(LColor::Yellow, F("Subscribed %d"), nSubs);
+                std::string newValChk = characteristic->getValue();
+                logColor(LColor::Yellow, F("NewValue = %s"), newValChk.c_str());
 
                 logColor(LColor::LightBlue, F("Characteristic value set"));
 
@@ -567,6 +583,7 @@ void BleLock::startService() {
                 logMemory("outgoingMessageTask: After notify");
 
                 logColor(LColor::LightBlue, F("Characteristic notified"));
+                }//all characteristics!!!!
             } else {
                 logColor(LColor::Red, F("Destination address not found in uniqueCharacteristics"));
             }

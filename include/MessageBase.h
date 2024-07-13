@@ -9,12 +9,20 @@
 using json = nlohmann::json;
 enum class MessageType {
     resOk,
-    reqRegKey
+    reqRegKey,
+    OpenRequest, 
+    SecurityCheckRequestest,
+    OpenCommand,
+    resKey
 };
 
 NLOHMANN_JSON_SERIALIZE_ENUM( MessageType, {
     {MessageType::resOk, "resOk"},
-    {MessageType::reqRegKey, "reqRegKey"}
+    {MessageType::reqRegKey, "reqRegKey"},
+    {MessageType::OpenRequest, "OpenRequest"},
+    {MessageType::SecurityCheckRequestest, "SecurityCheckRequestest"},
+    {MessageType::OpenCommand, "OpenCommand"},
+    {MessageType::resKey, "resKey"}
 })
 
 

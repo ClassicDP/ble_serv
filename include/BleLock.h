@@ -9,6 +9,7 @@
 #include <SPIFFS.h>
 #include "MessageBase.h"
 #include "ArduinoLog.h"
+#include "SecureConnection.h"
 
 using json = nlohmann::json;
 
@@ -52,6 +53,8 @@ public:
 
     void initializeMutex();
 
+    SecureConnection secureConnection;
+
     QueueHandle_t outgoingQueue;
     QueueHandle_t responseQueue;
     QueueHandle_t characteristicCreationQueue;
@@ -68,14 +71,19 @@ public:
     BLECharacteristic *pPublicCharacteristic;
 
     QueueHandle_t incomingQueue{};
+    std::string getMacAddress ()
+    {
+        return macAddress;
+    }
+
+    MessageBase *request(MessageBase *requestMessage, const std::string &destAddr, uint32_t timeout) const;
+
 private:
     [[noreturn]] [[noreturn]] static void characteristicCreationTask(void *pvParameter);
 
     [[noreturn]] static void outgoingMessageTask(void *pvParameter);
 
     [[noreturn]] static void parsingIncomingTask(void *pvParameter);
-
-    MessageBase *request(MessageBase *requestMessage, const std::string &destAddr, uint32_t timeout) const;
 
     QueueHandle_t getOutgoingQueueHandle() const;
 
