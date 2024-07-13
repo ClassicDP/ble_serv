@@ -135,6 +135,24 @@ void setup() {
         MessageBase::registerConstructor(MessageType::reqRegKey, []() -> MessageBase * { return new ReqRegKey(); });
         return true;
     }();
+    
+    bool registerResKey = []() {
+        MessageBase::registerConstructor(MessageType::resKey, []() -> MessageBase * { return new ResKey(); });
+        return true;
+    }();
+
+    bool registerOpenReq = []() {
+        MessageBase::registerConstructor(MessageType::OpenRequest, []() -> MessageBase * { return new OpenRequest(); });
+        return true;
+    }();
+    bool registerOpenCmd = []() {
+        MessageBase::registerConstructor(MessageType::OpenCommand, []() -> MessageBase * { return new OpenCommand(); });
+        return true;
+    }();
+    bool registerSecurituCheck = []() {
+        MessageBase::registerConstructor(MessageType::SecurityCheckRequestest, []() -> MessageBase * { return new SecurityCheckRequestest(); });
+        return true;
+    }();
 
     if (!SPIFFS.begin(true)) {
         logColor(LColor::Red, F("An error has occurred while mounting SPIFFS"));

@@ -360,7 +360,7 @@ void BleLock::loadCharacteristicsFromMemory() {
 
                 NimBLECharacteristic *characteristic = pService->createCharacteristic(
                         NimBLEUUID::fromString(uuid),
-                        NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY
+                        NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY | NIMBLE_PROPERTY::INDICATE
                 );
 
                 if (!characteristic) {
@@ -440,6 +440,7 @@ void BleLock::resumeAdvertising() {
 
     if (pAdvertising->isAdvertising()) {
         logColor(LColor::Yellow, F("Advertising is currently active. Stopping..."));
+        pAdvertising->setScanResponse(false);
         pAdvertising->stop();
     }
 
@@ -499,7 +500,7 @@ void BleLock::startService() {
 
             NimBLECharacteristic *newCharacteristic = bleLock->pService->createCharacteristic(
                     NimBLEUUID::fromString(uuidStr),
-                    NIMBLE_PROPERTY::NOTIFY | NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE
+                    NIMBLE_PROPERTY::NOTIFY | NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::INDICATE
             );
             logColor(LColor::LightBlue, F(" - createCharacteristic"));
             printCharacteristics(bleLock->pService);
@@ -550,13 +551,29 @@ void BleLock::startService() {
             if (it != bleLock->pairedDevices.end()) {
                 logColor(LColor::LightBlue, F("Destination address found in uniqueCharacteristics %s"), responseMessage->destinationAddress.c_str());
 
-                auto characteristic = bleLock->uniqueCharacteristics[it->second];
+                //auto characteristic = bleLock->uniqueCharacteristics[it->second];
+                //auto characteristic = bleLock->pService->getCharacteristic(it->second);
+                auto characteristics = bleLock->pService->getCharacteristics(it->second);
+
+                for (int nChar =0; nChar<characteristics.size(); nChar++)
+                {
+                    auto characteristic = characteristics[nChar];
+                logColor(LColor::Green, F("characteristics number: %d"),characteristics.size());
+
+
+                logColor(LColor::LightBlue, F("write to characteristic: %s"),characteristic->getUUID().toString().c_str());
                 std::string serializedMessage = responseMessage->serialize();
                 logColor(LColor::LightBlue, F("Serialized message: %s"), serializedMessage.c_str());
 
                 logMemory("outgoingMessageTask: Before setValue");
                 characteristic->setValue(serializedMessage);
-                logMemory("outgoingMessageTask: After setValue");
+                size_t nSubs = characteristic->getSubscribedCount();
+                std::string newVal = characteristic->getValue();
+                logMemory("outgoingMessageTask: After setValue Subscribers");
+                
+                logColor(LColor::Yellow, F("Subscribed %d"), nSubs);
+                std::string newValChk = characteristic->getValue();
+                logColor(LColor::Yellow, F("NewValue = %s"), newValChk.c_str());
 
                 logColor(LColor::LightBlue, F("Characteristic value set"));
 
@@ -565,6 +582,7 @@ void BleLock::startService() {
                 logMemory("outgoingMessageTask: After notify");
 
                 logColor(LColor::LightBlue, F("Characteristic notified"));
+                }//all characteristics!!!!
             } else {
                 logColor(LColor::Red, F("Destination address not found in uniqueCharacteristics"));
             }
