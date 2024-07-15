@@ -4,7 +4,7 @@
 #include "MessageBase.h"
 #include "BleLock.h"
 
-#define MessageMaxDelay 30000
+#define MessageMaxDelay 0xefffffff
 
 class ResOk : public MessageBase {
 public:
@@ -73,7 +73,10 @@ public:
     MessageBase *processRequest(void *context) override {
         auto lock = static_cast<BleLock *>(context);
         if (xSemaphoreTake(lock->bleMutex, portMAX_DELAY) == pdTRUE) {
-            lock->awaitingKeys.insert(key);
+            lock->secureConnection.generateAESKey (destinationAddress);
+            key = std::string((char*)lock->secureConnection.aesKeys.find (destinationAddress)->second.data(),
+                lock->secureConnection.aesKeys.find (destinationAddress)->second.size());
+            //lock->awaitingKeys.insert(key);
             xSemaphoreGive(lock->bleMutex);
         }
         /*
@@ -107,28 +110,30 @@ protected:
 
 class OpenCommand : public MessageBase {
 public:
-    std::string key;
     std::string randomField;
 
     OpenCommand() {
         type = MessageType::OpenCommand;
+        requestUUID = generateUUID();
     }
 
     void setRandomField(std::string randomFieldVal)
     {
         randomField = randomFieldVal;
     }
+    /*
     MessageBase *processRequest(void *context) override {
         auto lock = static_cast<BleLock *>(context);
         if (xSemaphoreTake(lock->bleMutex, portMAX_DELAY) == pdTRUE) {
-            lock->awaitingKeys.insert(key);
+            //lock->awaitingKeys.insert(key);
             xSemaphoreGive(lock->bleMutex);
         }
         auto res = new ResOk();
-        res->destinationAddress = key;
-        res->sourceAddress = key;
+        res->destinationAddress = sourceAddress;
+        res->sourceAddress = destinationAddress;
+        res->status = true;
         return res;
-    }
+    }*/
 
     std::string getEncryptedCommand ()
     {
@@ -137,23 +142,23 @@ public:
 
 protected:
     void serializeExtraFields(json &doc) override {
-        doc["key"] = key;
-        Log.notice("Serialized key: %s\n", key.c_str());
+        doc["randomField"] = SecureConnection::str2hex( randomField);
+        Log.notice("Serialized randomField: %s\n", SecureConnection::str2hex( randomField).c_str());
     }
 
     void deserializeExtraFields(const json &doc) override {
-        key = doc["key"];
-        Log.notice("Deserialized key: %s\n", key.c_str());
+        randomField = SecureConnection::hex2str( doc["randomField"]);
+        Log.notice("Deserialized randomField: %s\n", randomField.c_str());
     }
 };
 
 class SecurityCheckRequestest : public MessageBase {
 public:
-    std::string key;
     std::string randomField;
 
     SecurityCheckRequestest() {
         type = MessageType::SecurityCheckRequestest;
+        requestUUID = generateUUID();
     }
 
     void setRandomField(std::string randomFieldVal)
@@ -167,29 +172,29 @@ public:
         //    xSemaphoreGive(lock->bleMutex);
         //}
         bool result =- false;
-        std::string resultStr = lock->secureConnection.encryptMessageAES(randomField,"device-uuid");
+        std::string resultStr = lock->secureConnection.encryptMessageAES(randomField,"UUID");
         //result = (lock->temporaryField == resultStr);
         auto res = new OpenCommand();
-        res->destinationAddress = key;
-        res->sourceAddress = key;
+        //res->destinationAddress = key;
+        //res->sourceAddress = key;
         res->setRandomField (resultStr);
         return res;
     }
 
     std::string getEncryptedCommand (BleLock *lock)
     {
-        return lock->secureConnection.encryptMessageAES(randomField,"device-uuid");
+        return lock->secureConnection.encryptMessageAES(randomField,"UUID");;
     }
 
 protected:
     void serializeExtraFields(json &doc) override {
-        doc["key"] = key;
-        Log.notice("Serialized key: %s\n", key.c_str());
+        doc["randomField"] = randomField;
+        Log.notice("Serialized randomField: %s\n", randomField.c_str());
     }
 
     void deserializeExtraFields(const json &doc) override {
-        key = doc["key"];
-        Log.notice("Deserialized key: %s\n", key.c_str());
+        randomField = doc["randomField"];
+        Log.notice("Deserialized randomField: %s\n", randomField.c_str());
     }
 };
 
@@ -216,7 +221,7 @@ public:
 
         // Создаем запрос для проверки безопасности
         SecurityCheckRequestest* securityCheckRequest = new SecurityCheckRequestest();
-        securityCheckRequest->sourceAddress = lock->getMacAddress();
+        securityCheckRequest->sourceAddress = destinationAddress;
         securityCheckRequest->destinationAddress = sourceAddress;
         //securityCheckRequest->type = MessageType::SecurityCheck;
         securityCheckRequest->setRandomField(randomField);
@@ -225,6 +230,7 @@ public:
         MessageBase* securityCheckResponse = lock->request(securityCheckRequest, sourceAddress, MessageMaxDelay);
         delete securityCheckRequest;
 
+        logColor(LColor::Green, F("CHECK_ANSWER: %s"), securityCheckResponse->serialize().c_str());
         if (securityCheckResponse && securityCheckResponse->type == MessageType::OpenCommand) 
         {
             // Расшифровываем команду открытия и проверяем рандомное поле
@@ -232,19 +238,27 @@ public:
             if (decryptedCommand == randomField) {
                 // Отправляем ответ об успешном открытии
                 ResOk* successResponse = new ResOk();
-                successResponse->sourceAddress = lock->getMacAddress();
+                successResponse->sourceAddress = destinationAddress;
                 successResponse->destinationAddress = sourceAddress;
+                successResponse->status = true;
                 //successResponse->type = MessageType::ResOk;
 
-                lock->request(successResponse, sourceAddress, MessageMaxDelay/* таймаут */);
+                //lock->request(successResponse, sourceAddress, MessageMaxDelay/* таймаут */);
                 //delete successResponse;
-                delete securityCheckResponse;
+                //delete securityCheckResponse;
+                
                 //delete request;
 
                 Log.verbose(F("Замок открыт успешно"));
                 return successResponse; // Успешное завершение
             } else {
+                
+                ResOk* successResponse = new ResOk();
+                successResponse->sourceAddress = destinationAddress;
+                successResponse->destinationAddress = sourceAddress;
+                successResponse->status = false;
                 Log.error(F("Ошибка проверки безопасности"));
+                return successResponse; // Успешное завершение
             }
         } else {
             Log.error(F("Не удалось получить ответ на проверку безопасности"));
