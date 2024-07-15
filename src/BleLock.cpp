@@ -605,61 +605,88 @@ void BleLock::startService() {
         }
     }
 }
+struct RequestTaskParams {
+    BleLock *bleLock;
+    MessageBase *requestMessage;
+};
+
+void BleLock::processRequestTask(void *pvParameter) {
+    auto *params = static_cast<RequestTaskParams *>(pvParameter);
+    auto *bleLock = params->bleLock;
+    auto *requestMessage = params->requestMessage;
+
+    logColor(LColor::LightBlue, F("processRequestTask: Начало обработки запроса"));
+
+    // Обработайте запрос
+    MessageBase *responseMessage = requestMessage->processRequest(bleLock);
+
+    if (responseMessage) {
+        logColor(LColor::LightBlue, F("Отправка ответного сообщения в исходящую очередь"));
+        responseMessage->destinationAddress = requestMessage->sourceAddress;
+        responseMessage->sourceAddress = requestMessage->destinationAddress;
+        responseMessage->requestUUID = requestMessage->requestUUID;
+        if (xQueueSend(bleLock->outgoingQueue, &responseMessage, portMAX_DELAY) != pdPASS) {
+            logColor(LColor::Red, F("Не удалось отправить ответное сообщение в исходящую очередь"));
+            delete responseMessage;
+        }
+    } else {
+        auto responseMessageStr = new std::string(requestMessage->serialize());
+        logColor(LColor::LightBlue, F("Отправка строкового ответа в очередь ответов"));
+        if (xQueueSend(bleLock->responseQueue, &responseMessageStr, portMAX_DELAY) != pdPASS) {
+            logColor(LColor::Red, F("Не удалось отправить строковое ответное сообщение в очередь ответов"));
+            delete responseMessageStr;
+        }
+    }
+
+    delete requestMessage; // Очистка запроса
+    delete params; // Очистка параметров задачи
+    vTaskDelete(nullptr); // Удаление задачи
+}
+
 
 [[noreturn]] void BleLock::parsingIncomingTask(void *pvParameter) {
     auto *bleLock = static_cast<BleLock *>(pvParameter);
     std::tuple<std::string *, std::string *> *receivedMessageStrAndMac;
 
     while (true) {
-        logColor(LColor::LightBlue, F("parsingIncomingTask: Waiting to receive message from queue..."));
+        logColor(LColor::LightBlue, F("parsingIncomingTask: Ожидание получения сообщения из очереди..."));
 
         if (xQueueReceive(bleLock->incomingQueue, &receivedMessageStrAndMac, portMAX_DELAY) == pdTRUE) {
-            logMemory("parsingIncomingTask: Before parsing message");
+            logMemory("parsingIncomingTask: До обработки сообщения");
             auto receivedMessage = std::get<0>(*receivedMessageStrAndMac);
             auto address = std::get<1>(*receivedMessageStrAndMac);
-            logColor(LColor::LightBlue, F("parsingIncomingTask: Received message: %s from mac: %s"), receivedMessage->c_str(), address->c_str());
+            logColor(LColor::LightBlue, F("parsingIncomingTask: Получено сообщение: %s от MAC: %s"), receivedMessage->c_str(), address->c_str());
 
             try {
                 auto msg = MessageBase::createInstance(*receivedMessage);
                 if (msg) {
                     msg->sourceAddress = *address;
-                    logColor(LColor::LightBlue, F("Received request from: %s "), msg->sourceAddress.c_str());
+                    logColor(LColor::LightBlue, F("Получен запрос от: %s "), msg->sourceAddress.c_str());
 
-                    MessageBase *responseMessage = msg->processRequest(bleLock);
+                    // Создайте структуру параметров задачи
+                    auto *taskParams = new RequestTaskParams{bleLock, msg};
 
-                    if (responseMessage) {
-                        logColor(LColor::LightBlue, F("Sending response message to outgoing queue"));
-                        responseMessage->destinationAddress = msg->sourceAddress;
-                        responseMessage->sourceAddress = msg->destinationAddress;
-                        responseMessage->requestUUID = msg->requestUUID;
-                        if (xQueueSend(bleLock->outgoingQueue, &responseMessage, portMAX_DELAY) != pdPASS) {
-                            logColor(LColor::Red, F("Failed to send response message to outgoing queue"));
-                            delete responseMessage;
-                        }
-                    } else {
-                        auto responseMessageStr = new std::string(*receivedMessage);
-                        logColor(LColor::LightBlue, F("Sending response message string to response queue"));
-                        if (xQueueSend(bleLock->responseQueue, &responseMessageStr, portMAX_DELAY) != pdPASS) {
-                            logColor(LColor::Red, F("Failed to send response message string to response queue"));
-                            delete responseMessageStr;
-                        }
+                    // Создайте новую задачу для обработки запроса
+                    if (xTaskCreate(processRequestTask, "ProcessRequestTask", 8192, taskParams, 1, nullptr) != pdPASS) {
+                        logColor(LColor::Red, F("Не удалось создать задачу ProcessRequestTask"));
+                        delete msg;
+                        delete taskParams;
                     }
-                    delete msg; // Make sure to delete the msg after processing
                 } else {
-                    logColor(LColor::Red, F("Failed to create message instance"));
+                    logColor(LColor::Red, F("Не удалось создать экземпляр сообщения"));
                 }
             } catch (const json::parse_error &e) {
-                logColor(LColor::Red, F("JSON parse error: %s"), e.what());
+                logColor(LColor::Red, F("Ошибка парсинга JSON: %s"), e.what());
             } catch (const std::exception &e) {
-                logColor(LColor::Red, F("Exception occurred: %s"), e.what());
+                logColor(LColor::Red, F("Произошло исключение: %s"), e.what());
             }
-            logMemory("parsingIncomingTask: After parsing message");
+            logMemory("parsingIncomingTask: После обработки сообщения");
 
-            // Free the allocated memory for the received message
+            // Освобождение выделенной памяти для полученного сообщения
             delete receivedMessage;
             delete address;
             delete receivedMessageStrAndMac;
-            logMemory("parsingIncomingTask: After freeing memory");
+            logMemory("parsingIncomingTask: После освобождения памяти");
         }
     }
 }

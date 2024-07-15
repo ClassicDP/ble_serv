@@ -86,6 +86,7 @@ private:
     [[noreturn]] static void parsingIncomingTask(void *pvParameter);
 
     QueueHandle_t getOutgoingQueueHandle() const;
+    static void processRequestTask(void *pvParameter);
 
     std::string macAddress;
 };
