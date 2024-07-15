@@ -228,7 +228,8 @@ public:
 
         // Отправляем запрос на проверку безопасности и ждем ответ
         MessageBase* securityCheckResponse = lock->request(securityCheckRequest, sourceAddress, MessageMaxDelay);
-        delete securityCheckRequest;
+        //logColor(LColor::Green, F("delete CHECK_Request"));
+        //delete securityCheckRequest;
 
         logColor(LColor::Green, F("CHECK_ANSWER: %s"), securityCheckResponse->serialize().c_str());
         if (securityCheckResponse && securityCheckResponse->type == MessageType::OpenCommand) 
