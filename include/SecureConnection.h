@@ -33,7 +33,7 @@ public:
         return result;
     }
 
-    static std::string str2hex (std::string input)
+    static std::string vector2hex (std::vector<uint8_t> input)
     {
         const char* hexDigits = "0123456789abcdef";
         std::string output;
@@ -45,9 +45,9 @@ public:
         }
         return output;    
     }
-    static std::string hex2str (std::string input)
+    static std::vector<uint8_t> hex2vector (std::string input)
     {
-        std::string output;
+        std::vector<uint8_t> output;
         output.reserve(input.size() / 2); // Reserve space for the output string
 
         for (size_t i = 0; i < input.size(); i += 2) {
@@ -62,6 +62,16 @@ public:
         }
         return output;        
     }
+
+    std::string GetAESKey (std::string uuid)
+    {
+        return vector2hex(aesKeys.find (uuid)->second);
+    }
+    void SetAESKey (std::string uuid, std::string keyStr)
+    {
+        aesKeys[uuid] = hex2vector(keyStr);
+    }
+
     void generateRSAKeys(const std::string& uuid) {
         mbedtls_pk_context pk;
         mbedtls_pk_init(&pk);
@@ -114,8 +124,17 @@ public:
 
         AES_CBC_encrypt_buffer(&ctx, buffer.data(), buffer.size());
 
-        std::string encryptedMessage(reinterpret_cast<char*>(iv), sizeof(iv));
-        encryptedMessage.append(reinterpret_cast<char*>(buffer.data()), buffer.size());
+        //std::string encryptedMessage(reinterpret_cast<char*>(iv), sizeof(iv));
+        //encryptedMessage.append(reinterpret_cast<char*>(buffer.data()), buffer.size());
+        std::vector<uint8_t> tempBuffer;
+        //tempBuffer.emplace  (tempBuffer.end(), reinterpret_cast<uint8_t*>(iv), sizeof(iv)); 
+        //tempBuffer.emplace  (tempBuffer.end(), reinterpret_cast<uint8_t*>(buffer.data()), buffer.size()); 
+        for (int i = 0; i <  sizeof(iv);i++)
+            tempBuffer.push_back (iv[i]);
+        for (int i = 0; i <  buffer.size();i++)
+            tempBuffer.push_back (buffer.data()[i]);
+        
+        std::string encryptedMessage = vector2hex (tempBuffer);
 
         Serial.print("IV for AES: ");
         printHex(std::vector<uint8_t>(iv, iv + sizeof(iv)));
@@ -125,11 +144,12 @@ public:
         return encryptedMessage;
     }
 
-    std::string decryptMessageAES(const std::string& encryptedMessage, const std::string& uuid) {
+    std::string decryptMessageAES(const std::string& encryptedMessageStr, const std::string& uuid) {
         if (aesKeys.find(uuid) == aesKeys.end()) {
             return "Key not found";
         }
 
+        std::vector<uint8_t> encryptedMessage = hex2vector(encryptedMessageStr);
         uint8_t iv[16];
         memcpy(iv, encryptedMessage.data(), 16);
 

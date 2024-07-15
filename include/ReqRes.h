@@ -46,13 +46,13 @@ public:
 protected:
     void serializeExtraFields(json &doc) override {
         doc["status"] = status;
-        doc["key"] = SecureConnection::str2hex(key);
+        doc["key"] = key;
         Serial.printf("Serialized status: %d  key:%s\n", status, key.c_str());
     }
 
     void deserializeExtraFields(const json &doc) override {
         status = doc["status"];
-        key = SecureConnection::hex2str(doc["key"]);
+        key = doc["key"];
         Serial.printf("Deserialized status: %d  key:%s\n", status, key.c_str());
     }
     MessageBase *processRequest(void *context) override {
@@ -73,9 +73,10 @@ public:
     MessageBase *processRequest(void *context) override {
         auto lock = static_cast<BleLock *>(context);
         if (xSemaphoreTake(lock->bleMutex, portMAX_DELAY) == pdTRUE) {
-            lock->secureConnection.generateAESKey (destinationAddress);
-            key = std::string((char*)lock->secureConnection.aesKeys.find (destinationAddress)->second.data(),
-                lock->secureConnection.aesKeys.find (destinationAddress)->second.size());
+            lock->secureConnection.generateAESKey (sourceAddress);
+            key = lock->secureConnection.GetAESKey (sourceAddress);
+            //std::string((char*)lock->secureConnection.aesKeys.find (sourceAddress)->second.data(),
+            //   lock->secureConnection.aesKeys.find (sourceAddress)->second.size());
             //lock->awaitingKeys.insert(key);
             xSemaphoreGive(lock->bleMutex);
         }
@@ -85,8 +86,8 @@ public:
         res->sourceAddress = key;
         */
         auto res = new ResKey();
-        res->destinationAddress = key;
-        res->sourceAddress = key;
+        res->destinationAddress = sourceAddress;
+        res->sourceAddress = destinationAddress;
         res->status = 0;
         res->key = key;
         return res;
@@ -94,12 +95,12 @@ public:
 
 protected:
     void serializeExtraFields(json &doc) override {
-        doc["key"] = SecureConnection::str2hex( key);
+        doc["key"] = key;
         Serial.printf("Serialized key: %s\n", key.c_str());
     }
 
     void deserializeExtraFields(const json &doc) override {
-        key = SecureConnection::hex2str(doc["key"]);
+        key = doc["key"];
         Serial.printf("Deserialized key: %s\n", key.c_str());
     }
 };
@@ -142,12 +143,12 @@ public:
 
 protected:
     void serializeExtraFields(json &doc) override {
-        doc["randomField"] = SecureConnection::str2hex( randomField);
-        Log.notice("Serialized randomField: %s\n", SecureConnection::str2hex( randomField).c_str());
+        doc["randomField"] = randomField;
+        Log.notice("Serialized randomField: %s\n", randomField.c_str());
     }
 
     void deserializeExtraFields(const json &doc) override {
-        randomField = SecureConnection::hex2str( doc["randomField"]);
+        randomField = doc["randomField"];
         Log.notice("Deserialized randomField: %s\n", randomField.c_str());
     }
 };
@@ -236,6 +237,7 @@ public:
         {
             // Расшифровываем команду открытия и проверяем рандомное поле
             std::string decryptedCommand = lock->secureConnection.decryptMessageAES(((OpenCommand*)securityCheckResponse)->getEncryptedCommand(), sourceAddress);
+            logColor (LColor::Yellow, F("decryptedCommand = <%s>   etalonField = <%s>"),decryptedCommand.c_str(),randomField.c_str());
             if (decryptedCommand == randomField) {
                 // Отправляем ответ об успешном открытии
                 ResOk* successResponse = new ResOk();
