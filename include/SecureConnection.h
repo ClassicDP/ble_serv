@@ -33,18 +33,6 @@ public:
         return result;
     }
 
-    static std::string vector2hex (std::vector<uint8_t> input)
-    {
-        const char* hexDigits = "0123456789abcdef";
-        std::string output;
-        output.reserve(input.size() * 2); // Reserve space for the output string
-
-        for (unsigned char c : input) {
-            output.push_back(hexDigits[c >> 4]); // Get the upper 4 bits
-            output.push_back(hexDigits[c & 0x0F]); // Get the lower 4 bits
-        }
-        return output;    
-    }
     static std::vector<uint8_t> hex2vector (std::string input)
     {
         std::vector<uint8_t> output;
@@ -61,6 +49,48 @@ public:
             output.push_back((highNibble << 4) | lowNibble); // Combine the two nibbles
         }
         return output;        
+    }
+
+    std::string vector2hex(const std::vector<uint8_t>& vec) {
+        static const char* const hex_chars = "0123456789abcdef";
+        std::string hex;
+        hex.reserve(vec.size() * 2);
+        for (uint8_t byte : vec) {
+            hex.push_back(hex_chars[byte >> 4]);
+            hex.push_back(hex_chars[byte & 0x0F]);
+        }
+        return hex;
+    }
+
+    std::string encryptMessageAES(const std::string& message, const std::string& uuid) {
+        if (aesKeys.find(uuid) == aesKeys.end()) {
+            return "Key not found";
+        }
+
+        uint8_t iv[16];
+        mbedtls_ctr_drbg_random(&ctr_drbg, iv, sizeof(iv));
+
+        AES_ctx ctx{};
+        AES_init_ctx_iv(&ctx, aesKeys[uuid].data(), iv);
+
+        std::vector<uint8_t> buffer(message.begin(), message.end());
+        size_t padding_len = 16 - (buffer.size() % 16);
+        buffer.insert(buffer.end(), padding_len, static_cast<uint8_t>(padding_len));
+
+        AES_CBC_encrypt_buffer(&ctx, buffer.data(), buffer.size());
+
+        std::vector<uint8_t> tempBuffer;
+        tempBuffer.insert(tempBuffer.end(), iv, iv + sizeof(iv));
+        tempBuffer.insert(tempBuffer.end(), buffer.begin(), buffer.end());
+
+        std::string encryptedMessage = vector2hex(tempBuffer);
+
+        Serial.print("IV for AES: ");
+        printHex(std::vector<uint8_t>(iv, iv + sizeof(iv)));
+        Serial.print("Encrypted Message (partial): ");
+        printHex(std::vector<uint8_t>(buffer.begin(), buffer.begin() + 16)); // print first 16 bytes
+
+        return encryptedMessage;
     }
 
     std::string GetAESKey (std::string uuid)
@@ -106,44 +136,7 @@ public:
         Serial.print("Generated AES Key: ");
         printHex(aesKeys[uuid]);
     }
-
-    std::string encryptMessageAES(const std::string& message, const std::string& uuid) {
-        if (aesKeys.find(uuid) == aesKeys.end()) {
-            return "Key not found";
-        }
-
-        uint8_t iv[16];
-        mbedtls_ctr_drbg_random(&ctr_drbg, iv, sizeof(iv));
-
-        AES_ctx ctx{};
-        AES_init_ctx_iv(&ctx, aesKeys[uuid].data(), iv);
-
-        std::vector<uint8_t> buffer(message.begin(), message.end());
-        size_t padding_len = 16 - (buffer.size() % 16);
-        buffer.insert(buffer.end(), padding_len, static_cast<uint8_t>(padding_len));
-
-        AES_CBC_encrypt_buffer(&ctx, buffer.data(), buffer.size());
-
-        //std::string encryptedMessage(reinterpret_cast<char*>(iv), sizeof(iv));
-        //encryptedMessage.append(reinterpret_cast<char*>(buffer.data()), buffer.size());
-        std::vector<uint8_t> tempBuffer;
-        //tempBuffer.emplace  (tempBuffer.end(), reinterpret_cast<uint8_t*>(iv), sizeof(iv)); 
-        //tempBuffer.emplace  (tempBuffer.end(), reinterpret_cast<uint8_t*>(buffer.data()), buffer.size()); 
-        for (int i = 0; i <  sizeof(iv);i++)
-            tempBuffer.push_back (iv[i]);
-        for (int i = 0; i <  buffer.size();i++)
-            tempBuffer.push_back (buffer.data()[i]);
-        
-        std::string encryptedMessage = vector2hex (tempBuffer);
-
-        Serial.print("IV for AES: ");
-        printHex(std::vector<uint8_t>(iv, iv + sizeof(iv)));
-        Serial.print("Encrypted Message (partial): ");
-        printHex(std::vector<uint8_t>(buffer.begin(), buffer.begin() + 16)); // print first 16 bytes
-
-        return encryptedMessage;
-    }
-
+    
     std::string decryptMessageAES(const std::string& encryptedMessageStr, const std::string& uuid) {
         if (aesKeys.find(uuid) == aesKeys.end()) {
             return "Key not found";
