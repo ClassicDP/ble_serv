@@ -45,6 +45,10 @@ void logSuffix(Print *_logOutput, int logLevel) {
     _logOutput->println(); // Add newline
 }
 
+
+unsigned char publicKey[1600];
+unsigned char privateKey[3200]; // Увеличим размер буфера для приватного ключа
+
 void setup2() {
     std::string uuid = "device-uuid";
 
@@ -153,6 +157,16 @@ void setup() {
         MessageBase::registerConstructor(MessageType::SecurityCheckRequestest, []() -> MessageBase * { return new SecurityCheckRequestest(); });
         return true;
     }();
+
+    bool registerHelloRequest = []() {
+        MessageBase::registerConstructor(MessageType::HelloRequest, []() -> MessageBase * { return new HelloRequest(); });
+        return true;
+    }();
+    bool registerReceivePublic = []() {
+        MessageBase::registerConstructor(MessageType::ReceivePublic, []() -> MessageBase * { return new ReceivePublic(); });
+        return true;
+    }();
+
 
     if (!SPIFFS.begin(true)) {
         logColor(LColor::Red, F("An error has occurred while mounting SPIFFS"));

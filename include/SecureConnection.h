@@ -12,6 +12,10 @@
 #include <unordered_map>
 #include <vector>
 #include <string>
+#include <json.hpp>
+#include <SPIFFS.h>
+
+using json = nlohmann::json;
 
 class SecureConnection {
 public:
@@ -51,7 +55,7 @@ public:
         return output;        
     }
 
-    std::string vector2hex(const std::vector<uint8_t>& vec) {
+    static std::string vector2hex(const std::vector<uint8_t>& vec) {
         static const char* const hex_chars = "0123456789abcdef";
         std::string hex;
         hex.reserve(vec.size() * 2);
@@ -105,19 +109,29 @@ public:
     void generateRSAKeys(const std::string& uuid) {
         mbedtls_pk_context pk;
         mbedtls_pk_init(&pk);
+        Serial.println("mbedtls_pk_setup");
         mbedtls_pk_setup(&pk, mbedtls_pk_info_from_type(MBEDTLS_PK_RSA));
-        mbedtls_rsa_gen_key(mbedtls_pk_rsa(pk), mbedtls_ctr_drbg_random, &ctr_drbg, 2048, 65537);
+        Serial.println("mbedtls_pk_rsa");
+        int result = mbedtls_rsa_gen_key(mbedtls_pk_rsa(pk), mbedtls_ctr_drbg_random, &ctr_drbg, 2048, 65537);
+        Serial.print (result);
+        Serial.println(" mbedtls_pk_rsa");
 
-        unsigned char publicKey[1600];
-        unsigned char privateKey[3200]; // Увеличим размер буфера для приватного ключа
+        extern unsigned char publicKey[1600];
+        extern unsigned char privateKey[3200]; // Увеличим размер буфера для приватного ключа
         size_t len = sizeof(publicKey);
+        Serial.print (len);
+        Serial.println(" mbedtls_pk_write_pubkey_pem");
         mbedtls_pk_write_pubkey_pem(&pk, publicKey, len);
 
         len = sizeof(privateKey);
+        Serial.print (len);
+        Serial.println(" mbedtls_pk_write_key_pem ");
         mbedtls_pk_write_key_pem(&pk, privateKey, len);
 
+        Serial.println("keys=");
         keys[uuid] = {std::vector<uint8_t>(publicKey, publicKey + strlen((char*)publicKey)),
                       std::vector<uint8_t>(privateKey, privateKey + strlen((char*)privateKey))};
+        Serial.println("mbedtls_pk_free");
         mbedtls_pk_free(&pk);
 
         // Debug: print partial keys
@@ -136,7 +150,146 @@ public:
         Serial.print("Generated AES Key: ");
         printHex(aesKeys[uuid]);
     }
-    
+
+    void generateRSAPublicKeys(const std::string& uuid) 
+    {
+        // Initialize structures
+        mbedtls_pk_context pk;
+        mbedtls_ctr_drbg_context ctr_drbg;
+        mbedtls_entropy_context entropy;
+
+        mbedtls_pk_init(&pk);
+        mbedtls_ctr_drbg_init(&ctr_drbg);
+        mbedtls_entropy_init(&entropy);
+
+        const char *pers = "gen_public_key";
+        int ret = mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy, (const unsigned char *)pers, strlen(pers));
+        if (ret != 0) {
+            Serial.println("Failed to seed the random number generator");
+            return;
+        }
+
+        // Retrieve the private key for the given UUID
+        std::vector<uint8_t> privateKeyVec = keys.begin()->second.second;
+        std::string privateKeyPem(privateKeyVec.begin(), privateKeyVec.end());
+
+        // Parse the private key
+        ret = mbedtls_pk_parse_key(&pk, (const unsigned char *)privateKeyPem.c_str(), privateKeyPem.length() + 1, NULL, 0);
+        if (ret != 0) {
+            Serial.println("Failed to parse the private key");
+            return;
+        }
+
+        // Extract the public key
+        unsigned char publicKey[1600];
+        ret = mbedtls_pk_write_pubkey_pem(&pk, publicKey, sizeof(publicKey));
+        if (ret != 0) {
+            Serial.println("Failed to write the public key");
+            return;
+        }
+
+        // Print the public key
+        Serial.println("Public Key:");
+        Serial.println((char *)publicKey);
+
+        keys[uuid] = {std::vector<uint8_t>(publicKey, publicKey + strlen((char*)publicKey)),
+            privateKeyVec};
+
+
+        // Free structures
+        mbedtls_pk_free(&pk);
+        mbedtls_ctr_drbg_free(&ctr_drbg);
+        mbedtls_entropy_free(&entropy);
+    }
+
+
+//////////
+    bool LoadRSAKeys ()
+    {
+        if (SPIFFS.begin(true)) 
+        {
+            //logColor(LColor::LightBlue, F("SPIFFS mounted successfully."));
+            File file = SPIFFS.open("keys.rsa", FILE_READ);
+            if (file) 
+            {
+                //logColor(LColor::LightBlue, F("File opened successfully. Parsing JSON..."));
+
+                size_t size = file.size();
+                if (size > 1024) {
+                    Serial.println("File size is too large");
+                    file.close();
+                    return false;
+                }
+
+                std::unique_ptr<char[]> buf(new char[size]);
+                file.readBytes(buf.get(), size);
+                
+                json j;
+                try {
+                    j = json::parse(buf.get());
+                } catch (json::parse_error& e) {
+                    Serial.print("JSON parse error: ");
+                    Serial.println(e.what());
+                    file.close ();
+                    return false;
+                }
+
+                keys.clear();
+
+                for (auto& publicKeyObj : j["publicKeys"]) {
+                    std::string publicKey = publicKeyObj["publicKey"].get<std::string>();
+                    std::string macadr = publicKeyObj["macadr"].get<std::string>();
+                    std::string privateKey = publicKeyObj["privateKey"].get<std::string>().c_str();
+
+                    Serial.print("Private Key: ");
+                    Serial.println(privateKey.c_str());
+                    Serial.print("Public Key: ");
+                    Serial.print(publicKey.c_str());
+                    Serial.print(", MAC Address: ");
+                    Serial.println(macadr.c_str());
+                    std::pair<std::vector<uint8_t>, std::vector<uint8_t>> pair ( hex2vector(publicKey),hex2vector(privateKey));
+                    keys.insert_or_assign (macadr,pair);
+                }       
+                file.close ();        
+                return true;          
+            } 
+        }
+
+        return false;
+    }
+    bool SaveRSAKeys () {
+        json j;
+
+        if (keys.empty())
+            return true;
+
+        //std::string privateKey = vector2hex(keys.begin()->second.second);
+        //j["privateKey"] = privateKey;
+        
+        json publicKeys = json::array();
+        for (auto it = keys.begin(); it != keys.end(); it++)
+        {
+            std::string privateKey = vector2hex(it->second.second);
+            std::string publicKey = vector2hex(it->second.first);
+            std::string mac = it->first;
+            publicKeys.push_back({{"privateKey", privateKey}, {"publicKey", publicKey}, {"macadr", mac}});
+        }
+        
+        j["publicKeys"] = publicKeys;
+
+        File file = SPIFFS.open("keys.rsa", FILE_WRITE);
+        if (!file) {
+            Serial.println("Failed to open file for writing");
+            return false;
+        }
+
+        std::string serializedJson = j.dump();
+        file.print(serializedJson.c_str());
+        
+        file.close();
+        return true;
+    }
+   
     std::string decryptMessageAES(const std::string& encryptedMessageStr, const std::string& uuid) {
         if (aesKeys.find(uuid) == aesKeys.end()) {
             return "Key not found";
@@ -196,13 +349,14 @@ public:
         Serial.print("Encrypted RSA Message (partial): ");
         printHex(std::vector<uint8_t>(output.begin(), output.begin() + 16)); // print first 16 bytes
 
-        return {std::string(reinterpret_cast<char *>(output.data()), output_len)};
+        return vector2hex(output);//{std::string(reinterpret_cast<char *>(output.data()), output_len)};
     }
 
-    std::vector<uint8_t> decryptMessageRSA(const std::string& encryptedMessage, const std::string& uuid) {
+    std::vector<uint8_t> decryptMessageRSA(const std::string& encryptedMessageStr, const std::string& uuid) {
         if (keys.find(uuid) == keys.end()) {
             return stringToVector("Key not found");
         }
+        std::vector<uint8_t> encryptedMessage = hex2vector(encryptedMessageStr);
 
         mbedtls_pk_context pk;
         mbedtls_pk_init(&pk);
@@ -217,7 +371,7 @@ public:
 
         std::vector<uint8_t> output(512);
         size_t output_len;
-        ret = mbedtls_pk_decrypt(&pk, (const unsigned char*)encryptedMessage.c_str(), encryptedMessage.length(), output.data(), &output_len, output.size(), mbedtls_ctr_drbg_random, &ctr_drbg);
+        ret = mbedtls_pk_decrypt(&pk, (const unsigned char*)encryptedMessage.data(), encryptedMessage.size(), output.data(), &output_len, output.size(), mbedtls_ctr_drbg_random, &ctr_drbg);
         if (ret != 0) {
             mbedtls_pk_free(&pk);
             char error_buf[100];

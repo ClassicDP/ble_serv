@@ -53,6 +53,11 @@ public:
 
     void initializeMutex();
 
+    bool confirm ()
+    { 
+        return true;
+    }
+
     SecureConnection secureConnection;
 
     QueueHandle_t outgoingQueue;
@@ -69,6 +74,24 @@ public:
     BLEServer *pServer;
     BLEService *pService;
     BLECharacteristic *pPublicCharacteristic;
+
+    static std::unordered_map<std::string, std::string> messageMacBuff; // map for multypart messages
+    static std::unordered_map<std::string, bool> messageMacState; // map for multypart messages
+    static std::unordered_map<std::string, bool> messageControll; // map for multypart messages
+    static void setWaiter (std::string who, bool val)
+    {
+        messageControll[who] = val;
+    }
+    static bool getWaiter(std::string who)
+    {
+        return messageControll[who];
+    }
+
+    static void waitForMessage (std::string who)
+    {
+        while (!getWaiter(who))
+            vTaskDelay(10/portTICK_PERIOD_MS);
+    }
 
     QueueHandle_t incomingQueue{};
     std::string getMacAddress ()

@@ -1,5 +1,7 @@
 #include "BleLock.h"
 
+const std::string ComNeedNext = "NEXT";
+
 // Callbacks Implementation
 PublicCharacteristicCallbacks::PublicCharacteristicCallbacks(BleLock *lock) : lock(lock) {}
 
@@ -108,24 +110,66 @@ void logMemory(const std::string &prefix = "") {
 UniqueCharacteristicCallbacks::UniqueCharacteristicCallbacks(BleLock *lock, std::string uuid)
         : lock(lock), uuid(std::move(uuid)) {}
 
+std::unordered_map<std::string, bool> BleLock::messageControll; // map for multypart messages
+std::unordered_map<std::string, bool> BleLock::messageMacState; // map for multypart messages
+std::unordered_map<std::string, std::string> BleLock::messageMacBuff; // map for multypart messages
+
 void UniqueCharacteristicCallbacks::onWrite(NimBLECharacteristic *pCharacteristic, ble_gap_conn_desc *desc) {
     logColor(LColor::Yellow, F("UniqueCharacteristicCallbacks::onWrite called from: %s"),
              NimBLEAddress(desc->peer_ota_addr).toString().c_str());
+    
+    const std::string BEGIN_SEND = "begin_transaction"; 
+    const std::string END_SEND = "end_transaction";
+
     logMemory("onWrite");
     {
         std::string receivedMessage = pCharacteristic->getValue();
         logColor(LColor::LightBlue, F("Received message: %s"), receivedMessage.c_str());
+        std::string peerMac = NimBLEAddress(desc->peer_ota_addr).toString();
 
-        // Allocate memory for the received message and copy the string
-        auto *receivedMessageStrAndMac = new std::tuple{new std::string(receivedMessage),
-                                                        new std::string(NimBLEAddress(desc->peer_ota_addr).toString())};
+        if (receivedMessage == BEGIN_SEND )
+        {
+            BleLock::messageMacState[peerMac] = true;
+            BleLock::messageMacBuff[peerMac].clear();
+            pCharacteristic->setValue(ComNeedNext);
+            pCharacteristic->notify();
+        }
+        else if (BleLock::messageMacState[peerMac])
+        {
+            if (receivedMessage == END_SEND )
+            {
+                BleLock::messageMacState[peerMac] = false;
+                receivedMessage = BleLock::messageMacBuff[peerMac];
+                BleLock::messageMacBuff[peerMac].clear();
+            }
+            else
+            {
+                BleLock::messageMacBuff[peerMac] += receivedMessage;
+                pCharacteristic->setValue(ComNeedNext);
+                pCharacteristic->notify();
+                return;
+            }
+        }
+        
 
-        // Send the message to the JSON parsing queue
-        if (xQueueSend(lock->incomingQueue, &receivedMessageStrAndMac, portMAX_DELAY) != pdPASS) {
-            logColor(LColor::Red, F("Failed to send message to JSON parsing queue"));
-            delete std::get<0>(*receivedMessageStrAndMac); // Delete the received message string
-            delete std::get<1>(*receivedMessageStrAndMac); // Delete the MAC address string
-            delete receivedMessageStrAndMac; // Delete the tuple itself
+        //if it need next message
+        if (receivedMessage == ComNeedNext )
+        {
+            BleLock::setWaiter(NimBLEAddress(desc->peer_ota_addr).toString(), true);
+        }
+        else
+        {
+            // Allocate memory for the received message and copy the string
+            auto *receivedMessageStrAndMac = new std::tuple{new std::string(receivedMessage),
+                                                            new std::string(NimBLEAddress(desc->peer_ota_addr).toString())};
+
+            // Send the message to the JSON parsing queue
+            if (xQueueSend(lock->incomingQueue, &receivedMessageStrAndMac, portMAX_DELAY) != pdPASS) {
+                logColor(LColor::Red, F("Failed to send message to JSON parsing queue"));
+                delete std::get<0>(*receivedMessageStrAndMac); // Delete the received message string
+                delete std::get<1>(*receivedMessageStrAndMac); // Delete the MAC address string
+                delete receivedMessageStrAndMac; // Delete the tuple itself
+            }
         }
     }
     logMemory("onWrite");
@@ -281,6 +325,8 @@ void BleLock::setup() {
     logColor(LColor::LightBlue, F("JsonParsingTask created"));
 
     loadCharacteristicsFromMemory();
+
+    secureConnection.LoadRSAKeys();
 }
 
 QueueHandle_t BleLock::getOutgoingQueueHandle() const {
@@ -574,25 +620,71 @@ void BleLock::startService() {
 
                 logColor(LColor::LightBlue, F("write to characteristic: %s"),characteristic->getUUID().toString().c_str());
                 std::string serializedMessage = responseMessage->serialize();
-                logColor(LColor::LightBlue, F("Serialized message: %s"), serializedMessage.c_str());
+                int partsNum = serializedMessage.length()/80 + ((serializedMessage.length()%80)?1:0);
+                logColor(LColor::LightBlue, F("Serialized message: part-%d <"),partsNum);
+                for (int i=0; i < partsNum; i++)
+                {
+                    if (((i+1)*80)<serializedMessage.length()) 
+                        logColor(LColor::LightBlue, F("%s"), serializedMessage.substr(i*80,80).c_str());
+                    else
+                        logColor(LColor::LightBlue, F("%s"), serializedMessage.substr(i*80).c_str());
+                }
+                logColor(LColor::LightBlue, F("> Serialized message; "));
 
-                logMemory("outgoingMessageTask: Before setValue");
-                characteristic->setValue(serializedMessage);
-                size_t nSubs = characteristic->getSubscribedCount();
-                //std::string newVal = characteristic->getValue();
-                logMemory("outgoingMessageTask: After setValue Subscribers");
+                const int BLE_ATT_ATTR_MAX_LEN_IN = 160;////BLE_ATT_ATTR_MAX_LEN
+                if (serializedMessage.length() < BLE_ATT_ATTR_MAX_LEN_IN)
+                {
+                    logMemory("outgoingMessageTask: Before setValue");
+                    characteristic->setValue(serializedMessage);
+                    size_t nSubs = characteristic->getSubscribedCount();
+                    //std::string newVal = characteristic->getValue();
+                    logMemory("outgoingMessageTask: After setValue Subscribers");
 
-                logColor(LColor::Yellow, F("Subscribed %d"), nSubs);
-                //std::string newValChk = characteristic->getValue();
-                //logColor(LColor::Yellow, F("NewValue = %s"), newValChk.c_str());
+                    logColor(LColor::Yellow, F("Subscribed %d"), nSubs);
+                    //std::string newValChk = characteristic->getValue();
+                    //logColor(LColor::Yellow, F("NewValue = %s"), newValChk.c_str());
 
-                logColor(LColor::LightBlue, F("Characteristic value set"));
+                    logColor(LColor::LightBlue, F("Characteristic value set"));
 
-                logMemory("outgoingMessageTask: Before notify");
-                characteristic->notify();
-                logMemory("outgoingMessageTask: After notify");
+                    logMemory("outgoingMessageTask: Before notify");
+                    characteristic->notify();
+                    logMemory("outgoingMessageTask: After notify");
 
-                logColor(LColor::LightBlue, F("Characteristic notified"));
+                    logColor(LColor::LightBlue, F("Characteristic notified"));
+                }
+                else
+                {// send parts
+                    const std::string BEGIN_SEND = "begin_transaction"; 
+                    const std::string END_SEND = "end_transaction";
+                    const TickType_t deleyPart = 100/portTICK_PERIOD_MS;
+                    partsNum = serializedMessage.length()/BLE_ATT_ATTR_MAX_LEN_IN + ((serializedMessage.length()%BLE_ATT_ATTR_MAX_LEN_IN)?1:0);
+                    characteristic->setValue(BEGIN_SEND);
+                    setWaiter(responseMessage->destinationAddress,false);
+                    characteristic->notify();
+
+                    logColor(LColor::Yellow, F("BEGIN_SEND"));
+                    //vTaskDelay(deleyPart);
+                    for (int i=0; i < partsNum; i++)
+                    {
+                        std::string subS;
+                        waitForMessage (responseMessage->destinationAddress);
+                        if (((i+1)*BLE_ATT_ATTR_MAX_LEN_IN)<serializedMessage.length()) 
+                            subS=(serializedMessage.substr(i*BLE_ATT_ATTR_MAX_LEN_IN,BLE_ATT_ATTR_MAX_LEN_IN));
+                        else
+                            subS=(serializedMessage.substr(i*BLE_ATT_ATTR_MAX_LEN_IN));
+                        characteristic->setValue(subS);
+                        setWaiter(responseMessage->destinationAddress, false);
+                        characteristic->notify();
+                        logColor(LColor::Yellow, F("PART_SEND <%s>"),subS.c_str());
+
+                        //vTaskDelay(deleyPart);
+                    }
+                    waitForMessage (responseMessage->destinationAddress);
+                    characteristic->setValue(END_SEND);
+                    logColor(LColor::Yellow, F("END_SEND"));
+                    characteristic->notify();
+
+                }
                 //}//all characteristics!!!!
             } else {
                 logColor(LColor::Red, F("Destination address not found in uniqueCharacteristics"));

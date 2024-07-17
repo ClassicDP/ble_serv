@@ -73,11 +73,10 @@ public:
     MessageBase *processRequest(void *context) override {
         auto lock = static_cast<BleLock *>(context);
         if (xSemaphoreTake(lock->bleMutex, portMAX_DELAY) == pdTRUE) {
-            lock->secureConnection.generateAESKey (sourceAddress);
-            key = lock->secureConnection.GetAESKey (sourceAddress);
-            //std::string((char*)lock->secureConnection.aesKeys.find (sourceAddress)->second.data(),
-            //   lock->secureConnection.aesKeys.find (sourceAddress)->second.size());
-            //lock->awaitingKeys.insert(key);
+            //lock->secureConnection.generateAESKey (sourceAddress);
+            //key = lock->secureConnection.GetAESKey (sourceAddress);
+            auto newKey = lock->secureConnection.decryptMessageRSA (key,sourceAddress );
+            lock->secureConnection.aesKeys[sourceAddress] = newKey;
             xSemaphoreGive(lock->bleMutex);
         }
         /*
@@ -88,8 +87,8 @@ public:
         auto res = new ResKey();
         res->destinationAddress = sourceAddress;
         res->sourceAddress = destinationAddress;
-        res->status = 0;
-        res->key = key;
+        res->status = true;
+        res->key = "";
         return res;
     }
 
@@ -285,6 +284,126 @@ protected:
         Log.notice("Deserialized OpenRequest: %s\n", randomField.c_str());
     }
 };
+
+
+////////////////////////
+///////////////////////
+////////////////////////
+#define SERVER_PART
+
+class ReceivePublic : public MessageBase {
+public:
+    std::string key;
+
+    ReceivePublic() {
+        type = MessageType::ReceivePublic;
+    }
+
+    explicit ReceivePublic(std::string newKey) :  key(newKey) {
+        type = MessageType::ReceivePublic;
+    }
+protected:
+
+    void serializeExtraFields(json &doc) override {
+        doc["key"] = key;
+        Serial.printf("Serialized key:lem=%d\n", key.length());
+    }
+
+    void deserializeExtraFields(const json &doc) override {
+        key = doc["key"];
+        Serial.printf("Deserialized key:len=%d\n", key.length());
+    }
+    MessageBase *processRequest(void *context) override {
+        auto lock = static_cast<BleLock *>(context);
+        return nullptr;
+    }
+
+};
+// cliewnt handshake request
+class HelloRequest : public MessageBase {
+public:
+    bool status{};
+    std::string key;
+
+    HelloRequest() {
+        type = MessageType::HelloRequest;
+    }
+
+    explicit HelloRequest(bool status, std::string newKey) : status(status), key(newKey) {
+        type = MessageType::HelloRequest;
+    }
+protected:
+    void serializeExtraFields(json &doc) override {
+        doc["status"] = status;
+        doc["key"] = key;
+        Serial.printf("Serialized status: %d  key:%s\n", status, key.c_str()?key.c_str():"");
+    }
+
+    void deserializeExtraFields(const json &doc) override {
+        status = doc["status"];
+        key = doc["key"];
+        Serial.printf("Deserialized status: %d  key:%s\n", status, key.c_str()?key.c_str():"");
+    }
+    MessageBase *processRequest(void *context) override {
+        auto lock = static_cast<BleLock *>(context);
+        logColor(LColor::Yellow, F("HelloRequest processRequest status = %d"), status);
+
+        if (status) //handshake suceeded  check key and send Ok
+        {
+                logColor (LColor::Green, F("check hash!"));
+            bool bChkResult = false;
+            auto keyPair = lock->secureConnection.keys.find(sourceAddress);
+            if (keyPair!=lock->secureConnection.keys.end())
+            {
+                logColor (LColor::Green, F("Found keyPair!"));
+                //keyPair->second.first;
+                //keyPair->second.second;
+                auto rawMessage = key;
+                //int size = rawMessage.size();
+
+                auto pubKey =  keyPair->second.first;
+                auto hash = lock->secureConnection.generatePublicKeyHash (pubKey, 16);
+                bool isSiteConfirmed = lock->confirm ();
+                logColor(LColor::Yellow, F("%s <--> %s"), hash.c_str(), rawMessage.c_str());
+                if (hash == rawMessage && isSiteConfirmed)
+                    bChkResult = true;
+
+                //std::string encMessage  = std::string ((char*)rawMessage.data(),rawMessage.size()); 
+                //std::vector<uint8_t> encryptAESKey = lock->secureConnection.decryptMessageRSA (encMessage,sourceAddress);
+                //lock->secureConnection.SetAESKey(sourceAddress, SecureConnection::vector2hex(encryptAESKey));
+            }
+            ResOk* res = new ResOk();
+            res->destinationAddress = sourceAddress;
+            res->sourceAddress = destinationAddress;
+            res->status = bChkResult;
+            res->requestUUID = requestUUID;
+            return res;
+        }
+        else // sdend publick key
+        {
+            if (lock->secureConnection.keys.find(sourceAddress) == lock->secureConnection.keys.end())
+            {
+                logColor (LColor::Green, F("Gen key!"));
+                lock->secureConnection.generateRSAKeys (sourceAddress);
+                logColor (LColor::Green, F("Gen key - finished"));
+            }
+            logColor (LColor::Green, F("Save keys!"));
+            lock->secureConnection.SaveRSAKeys();
+            logColor (LColor::Green, F("Keys saved!"));
+
+            ReceivePublic* res = new ReceivePublic;
+
+            res->destinationAddress = sourceAddress;
+            res->sourceAddress = destinationAddress;            
+            res->key = SecureConnection::vector2hex(lock->secureConnection.keys[sourceAddress].first);
+            res->requestUUID = requestUUID;
+            return res;
+        }
+        return nullptr;
+    }
+};
+
+
 
 #endif
 
