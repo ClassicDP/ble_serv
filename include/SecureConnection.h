@@ -349,6 +349,7 @@ public:
         Serial.print("Encrypted RSA Message (partial): ");
         printHex(std::vector<uint8_t>(output.begin(), output.begin() + 16)); // print first 16 bytes
 
+        output.erase(output.begin()+output_len, output.end());
         return vector2hex(output);//{std::string(reinterpret_cast<char *>(output.data()), output_len)};
     }
 
