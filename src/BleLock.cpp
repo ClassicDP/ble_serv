@@ -118,58 +118,22 @@ void UniqueCharacteristicCallbacks::onWrite(NimBLECharacteristic *pCharacteristi
     logColor(LColor::Yellow, F("UniqueCharacteristicCallbacks::onWrite called from: %s"),
              NimBLEAddress(desc->peer_ota_addr).toString().c_str());
     
-    const std::string BEGIN_SEND = "begin_transaction"; 
-    const std::string END_SEND = "end_transaction";
-
     logMemory("onWrite");
     {
         std::string receivedMessage = pCharacteristic->getValue();
         logColor(LColor::LightBlue, F("Received message: %s"), receivedMessage.c_str());
         std::string peerMac = NimBLEAddress(desc->peer_ota_addr).toString();
 
-        if (receivedMessage == BEGIN_SEND )
-        {
-            BleLock::messageMacState[peerMac] = true;
-            BleLock::messageMacBuff[peerMac].clear();
-            pCharacteristic->setValue(ComNeedNext);
-            pCharacteristic->notify();
-        }
-        else if (BleLock::messageMacState[peerMac])
-        {
-            if (receivedMessage == END_SEND )
-            {
-                BleLock::messageMacState[peerMac] = false;
-                receivedMessage = BleLock::messageMacBuff[peerMac];
-                BleLock::messageMacBuff[peerMac].clear();
-            }
-            else
-            {
-                BleLock::messageMacBuff[peerMac] += receivedMessage;
-                pCharacteristic->setValue(ComNeedNext);
-                pCharacteristic->notify();
-                return;
-            }
-        }
-        
+        // Allocate memory for the received message and copy the string
+        auto *receivedMessageStrAndMac = new std::tuple{new std::string(receivedMessage),
+                                                        new std::string(NimBLEAddress(desc->peer_ota_addr).toString())};
 
-        //if it need next message
-        if (receivedMessage == ComNeedNext )
-        {
-            BleLock::setWaiter(NimBLEAddress(desc->peer_ota_addr).toString(), true);
-        }
-        else
-        {
-            // Allocate memory for the received message and copy the string
-            auto *receivedMessageStrAndMac = new std::tuple{new std::string(receivedMessage),
-                                                            new std::string(NimBLEAddress(desc->peer_ota_addr).toString())};
-
-            // Send the message to the JSON parsing queue
-            if (xQueueSend(lock->incomingQueue, &receivedMessageStrAndMac, portMAX_DELAY) != pdPASS) {
-                logColor(LColor::Red, F("Failed to send message to JSON parsing queue"));
-                delete std::get<0>(*receivedMessageStrAndMac); // Delete the received message string
-                delete std::get<1>(*receivedMessageStrAndMac); // Delete the MAC address string
-                delete receivedMessageStrAndMac; // Delete the tuple itself
-            }
+        // Send the message to the JSON parsing queue
+        if (xQueueSend(lock->incomingQueue, &receivedMessageStrAndMac, portMAX_DELAY) != pdPASS) {
+            logColor(LColor::Red, F("Failed to send message to JSON parsing queue"));
+            delete std::get<0>(*receivedMessageStrAndMac); // Delete the received message string
+            delete std::get<1>(*receivedMessageStrAndMac); // Delete the MAC address string
+            delete receivedMessageStrAndMac; // Delete the tuple itself
         }
     }
     logMemory("onWrite");
@@ -654,35 +618,27 @@ void BleLock::startService() {
                 }
                 else
                 {// send parts
-                    const std::string BEGIN_SEND = "begin_transaction"; 
-                    const std::string END_SEND = "end_transaction";
-                    const TickType_t deleyPart = 100/portTICK_PERIOD_MS;
+                    const TickType_t deleyPart = 10/portTICK_PERIOD_MS;
                     partsNum = serializedMessage.length()/BLE_ATT_ATTR_MAX_LEN_IN + ((serializedMessage.length()%BLE_ATT_ATTR_MAX_LEN_IN)?1:0);
-                    characteristic->setValue(BEGIN_SEND);
-                    setWaiter(responseMessage->destinationAddress,false);
-                    characteristic->notify();
 
                     logColor(LColor::Yellow, F("BEGIN_SEND"));
                     //vTaskDelay(deleyPart);
                     for (int i=0; i < partsNum; i++)
                     {
                         std::string subS;
-                        waitForMessage (responseMessage->destinationAddress);
                         if (((i+1)*BLE_ATT_ATTR_MAX_LEN_IN)<serializedMessage.length()) 
                             subS=(serializedMessage.substr(i*BLE_ATT_ATTR_MAX_LEN_IN,BLE_ATT_ATTR_MAX_LEN_IN));
                         else
                             subS=(serializedMessage.substr(i*BLE_ATT_ATTR_MAX_LEN_IN));
                         characteristic->setValue(subS);
-                        setWaiter(responseMessage->destinationAddress, false);
                         characteristic->notify();
                         logColor(LColor::Yellow, F("PART_SEND <%s>"),subS.c_str());
 
-                        //vTaskDelay(deleyPart);
+                        vTaskDelay(deleyPart);
                     }
-                    waitForMessage (responseMessage->destinationAddress);
-                    characteristic->setValue(END_SEND);
+                    //characteristic->setValue(END_SEND);
                     logColor(LColor::Yellow, F("END_SEND"));
-                    characteristic->notify();
+                    //characteristic->notify();
 
                 }
                 //}//all characteristics!!!!
@@ -759,6 +715,7 @@ void BleLock::processRequestTask(void *pvParameter) {
             auto address = std::get<1>(*receivedMessageStrAndMac);
             logColor(LColor::LightBlue, F("parsingIncomingTask: Получено сообщение: %s от MAC: %s"), receivedMessage->c_str(), address->c_str());
 
+            bool partOfMessage = false;
             try {
                 auto msg = MessageBase::createInstance(*receivedMessage);
                 if (msg) {
@@ -774,13 +731,48 @@ void BleLock::processRequestTask(void *pvParameter) {
                         delete msg;
                         delete taskParams;
                     }
+                    messageMacBuff[*address].clear();
                 } else {
+                    partOfMessage = true;
                     logColor(LColor::Red, F("Не удалось создать экземпляр сообщения"));
                 }
             } catch (const json::parse_error &e) {
+                partOfMessage = true;
                 logColor(LColor::Red, F("Ошибка парсинга JSON: %s"), e.what());
             } catch (const std::exception &e) {
+                partOfMessage = true;
                 logColor(LColor::Red, F("Произошло исключение: %s"), e.what());
+            }
+
+            if (partOfMessage)
+            {
+                messageMacBuff[*address] += *receivedMessage;
+
+                try {
+                    auto msg = MessageBase::createInstance(messageMacBuff[*address]);
+                    if (msg) {
+                        msg->sourceAddress = *address;
+                        logColor(LColor::LightBlue, F("Получен запрос от: %s "), msg->sourceAddress.c_str());
+
+                        // Создайте структуру параметров задачи
+                        auto *taskParams = new RequestTaskParams{bleLock, msg};
+
+                        // Создайте новую задачу для обработки запроса
+                        if (xTaskCreate(processRequestTask, "ProcessRequestTask", 8192, taskParams, 1, nullptr) != pdPASS) {
+                            logColor(LColor::Red, F("Не удалось создать задачу ProcessRequestTask"));
+                            delete msg;
+                            delete taskParams;
+                        }
+                        messageMacBuff[*address].clear();
+                    } else {
+                        logColor(LColor::Red, F("Не удалось создать экземпляр сообщения"));
+                    }
+                } catch (const json::parse_error &e) {
+                    logColor(LColor::Red, F("Ошибка парсинга JSON: %s"), e.what());
+                } catch (const std::exception &e) {
+                    logColor(LColor::Red, F("Произошло исключение: %s"), e.what());
+                }
+
             }
             logMemory("parsingIncomingTask: После обработки сообщения");
 
