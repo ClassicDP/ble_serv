@@ -2,7 +2,7 @@
 #define REGRES_H
 
 #include "MessageBase.h"
-#include "BleLock.h"
+#include "BleLockAndKey.h"
 
 #define MessageMaxDelay 0xefffffff
 
@@ -71,13 +71,13 @@ public:
     }
 
     MessageBase *processRequest(void *context) override {
-        auto lock = static_cast<BleLock *>(context);
-        if (xSemaphoreTake(lock->bleMutex, portMAX_DELAY) == pdTRUE) {
+        auto lock = static_cast<BleLockServer *>(context);
+        if (xSemaphoreTake(lock->mutex, portMAX_DELAY) == pdTRUE) {
             //lock->secureConnection.generateAESKey (sourceAddress);
             //key = lock->secureConnection.GetAESKey (sourceAddress);
             auto newKey = lock->secureConnection.decryptMessageRSA (key,sourceAddress );
             lock->secureConnection.aesKeys[sourceAddress] = newKey;
-            xSemaphoreGive(lock->bleMutex);
+            xSemaphoreGive(lock->mutex);
         }
         /*
         auto res = new ResOk();
@@ -166,7 +166,7 @@ public:
         randomField = randomFieldVal;
     }
     MessageBase *processRequest(void *context) override {
-        auto lock = static_cast<BleLock *>(context);
+        auto lock = static_cast<BleLockServer *>(context);
         //if (xSemaphoreTake(lock->bleMutex, portMAX_DELAY) == pdTRUE) {
         //    lock->awaitingKeys.insert(key);
         //    xSemaphoreGive(lock->bleMutex);
@@ -181,7 +181,7 @@ public:
         return res;
     }
 
-    std::string getEncryptedCommand (BleLock *lock)
+    std::string getEncryptedCommand (BleLockServer *lock)
     {
         return lock->secureConnection.encryptMessageAES(randomField,"UUID");;
     }
@@ -215,7 +215,7 @@ public:
     }
 
     MessageBase *processRequest(void *context) override {
-        auto lock = static_cast<BleLock *>(context);
+        auto lock = static_cast<BleLockServer *>(context);
 
         std::string randomField = lock->secureConnection.generateRandomField();
 
@@ -314,7 +314,7 @@ protected:
         Serial.printf("Deserialized key:len=%d\n", key.length());
     }
     MessageBase *processRequest(void *context) override {
-        auto lock = static_cast<BleLock *>(context);
+        auto lock = static_cast<BleLockServer *>(context);
         return nullptr;
     }
 
@@ -345,7 +345,7 @@ protected:
         Serial.printf("Deserialized status: %d  key:%s\n", status, key.c_str()?key.c_str():"");
     }
     MessageBase *processRequest(void *context) override {
-        auto lock = static_cast<BleLock *>(context);
+        auto lock = static_cast<BleLockServer *>(context);
         logColor(LColor::Yellow, F("HelloRequest processRequest status = %d"), status);
 
         if (status) //handshake suceeded  check key and send Ok
