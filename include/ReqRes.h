@@ -5,17 +5,28 @@
 #include "BleLockAndKey.h"
 
 #define MessageMaxDelay 0xefffffff
+enum class MessageTypeReg {
+    resOk,
+    reqRegKey,
+    OpenRequest, 
+    SecurityCheckRequestest,
+    OpenCommand,
+    resKey, 
+    HelloRequest,
+    ReceivePublic
+};
+
 
 class ResOk : public MessageBase {
 public:
     bool status{};
 
     ResOk() {
-        type = MessageType::resOk;
+        type = (MessageType)MessageTypeReg::resOk;
     }
 
     explicit ResOk(bool status) : status(status) {
-        type = MessageType::resOk;
+        type = (MessageType)MessageTypeReg::resOk;
     }
 
 protected:
@@ -36,11 +47,11 @@ public:
     std::string key{};
 
     ResKey() {
-        type = MessageType::resKey;
+        type = (MessageType)MessageTypeReg::resKey;
     }
 
     explicit ResKey(bool status, std::string newKey) : status(status), key(newKey) {
-        type = MessageType::resKey;
+        type = (MessageType)MessageTypeReg::resKey;
     }
 
 protected:
@@ -67,7 +78,7 @@ public:
     std::string key;
 
     ReqRegKey() {
-        type = MessageType::reqRegKey;
+        type = (MessageType)MessageTypeReg::reqRegKey;
     }
 
     MessageBase *processRequest(void *context) override {
@@ -113,7 +124,7 @@ public:
     std::string randomField;
 
     OpenCommand() {
-        type = MessageType::OpenCommand;
+        type = (MessageType)MessageTypeReg::OpenCommand;
         requestUUID = generateUUID();
     }
 
@@ -157,7 +168,7 @@ public:
     std::string randomField;
 
     SecurityCheckRequestest() {
-        type = MessageType::SecurityCheckRequestest;
+        type = (MessageType)MessageTypeReg::SecurityCheckRequestest;
         requestUUID = generateUUID();
     }
 
@@ -206,7 +217,7 @@ public:
     std::string randomField;
 
     OpenRequest() {
-        type = MessageType::OpenRequest;
+        type = (MessageType)MessageTypeReg::OpenRequest;
     }
 
     void setRandomField(std::string randomFieldVal)
@@ -232,7 +243,7 @@ public:
         //delete securityCheckRequest;
 
         logColor(LColor::Green, F("CHECK_ANSWER: %s"), securityCheckResponse->serialize().c_str());
-        if (securityCheckResponse && securityCheckResponse->type == MessageType::OpenCommand) 
+        if (securityCheckResponse && securityCheckResponse->type == (MessageType)MessageTypeReg::OpenCommand) 
         {
             // Расшифровываем команду открытия и проверяем рандомное поле
             std::string decryptedCommand = lock->secureConnection.decryptMessageAES(((OpenCommand*)securityCheckResponse)->getEncryptedCommand(), sourceAddress);
@@ -296,11 +307,11 @@ public:
     std::string key;
 
     ReceivePublic() {
-        type = MessageType::ReceivePublic;
+        type = (MessageType)MessageTypeReg::ReceivePublic;
     }
 
     explicit ReceivePublic(std::string newKey) :  key(newKey) {
-        type = MessageType::ReceivePublic;
+        type = (MessageType)MessageTypeReg::ReceivePublic;
     }
 protected:
 
@@ -326,11 +337,11 @@ public:
     std::string key;
 
     HelloRequest() {
-        type = MessageType::HelloRequest;
+        type = (MessageType)MessageTypeReg::HelloRequest;
     }
 
     explicit HelloRequest(bool status, std::string newKey) : status(status), key(newKey) {
-        type = MessageType::HelloRequest;
+        type = (MessageType)MessageTypeReg::HelloRequest;
     }
 protected:
     void serializeExtraFields(json &doc) override {
