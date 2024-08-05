@@ -1,6 +1,7 @@
 #ifndef REGRES_H
 #define REGRES_H
 
+#include <json.hpp>
 #include "MessageBase.h"
 #include "BleLockAndKey.h"
 
@@ -13,7 +14,12 @@ enum class MessageTypeReg {
     OpenCommand,
     resKey, 
     HelloRequest,
-    ReceivePublic
+    ReceivePublic, //s web part
+
+    GetDeviceList,
+    AccessOnOff,
+    AccessOnOFFSingle,
+    AccessOnOFFMulty
 };
 
 
@@ -374,7 +380,7 @@ protected:
 
                 auto pubKey =  keyPair->second.first;
                 auto hash = lock->secureConnection.generatePublicKeyHash (pubKey, 16);
-                bool isSiteConfirmed = lock->confirm ();
+                bool isSiteConfirmed = lock->confirm (sourceAddress);
                 logColor(LColor::Yellow, F("%s <--> %s"), hash.c_str(), rawMessage.c_str());
                 if (hash == rawMessage && isSiteConfirmed)
                     bChkResult = true;
@@ -414,7 +420,204 @@ protected:
     }
 };
 
+//////// data to server
+//    GetDeviceList,
+//    AccessOnOff
+//    AccessOnOFFSingle
+//    AccessOnOFFMulty
+////////////////////////
+struct deciceConfirmedStruct
+{
+    std::string mac;
+    bool isConfirmed;
 
+    // Define how to convert to/from JSON
+    friend void to_json(nlohmann::json& j, const deciceConfirmedStruct& d) {
+        j = nlohmann::json{{"mac", d.mac}, {"confirmed", d.isConfirmed}};
+    }
+
+    friend void from_json(const nlohmann::json& j, deciceConfirmedStruct& d) {
+        j.at("mac").get_to(d.mac);
+        j.at("confirmed").get_to(d.isConfirmed);
+    }
+
+};
+
+class AccessOnOff : public MessageBase {
+public:
+    std::vector<deciceConfirmedStruct> devices;
+    
+    AccessOnOff() {
+        type = (MessageType)MessageTypeReg::AccessOnOff;
+    }
+
+protected:
+    // Define how to convert to/from JSON
+    friend void to_json(nlohmann::json& j, const AccessOnOff& a) {
+        j = nlohmann::json{{"list", a.devices}};
+    }
+
+    friend void from_json(const nlohmann::json& j, AccessOnOff& a) {
+        j.at("list").get_to(a.devices);
+    }
+
+    void serializeExtraFields(json &doc) override {
+        //for (int i=0; i < devices.size(); i++)
+        //{
+        //    doc[devices[i].mac] = devices[i].isConfirmed;
+        //}
+        nlohmann::json j;
+        for (int i=0; i < devices.size(); i++)
+            j[devices[i].mac] = devices[i].isConfirmed;
+        doc["list"] = j;
+    }
+
+    void deserializeExtraFields(const json &doc) override {
+        devices.clear();
+        /*for (auto it = doc.begin(); it!=doc.end(); it++)
+        {
+            deciceConfirmedStruct tmp;
+            tmp.mac = it.key();
+            tmp.mac = it.value();
+            devices.push_back(tmp);
+        }*/
+        nlohmann::json j;
+        j = doc["list"];
+        for (auto it = j.begin(); it!=j.end(); it++)
+        {
+            deciceConfirmedStruct tmp;
+            tmp.mac = it.key();
+            tmp.mac = it.value();
+            devices.push_back(tmp);
+        }
+    }
+
+    MessageBase *processRequest(void *context) override {
+        auto lock = static_cast<BleLockServer *>(context);
+        logColor(LColor::Yellow, F("AccessOnOff processRequest"));
+        return nullptr;
+        //
+    }
+};
+
+class GetDeviceList : public MessageBase {
+public:
+    GetDeviceList() {
+        type = (MessageType)MessageTypeReg::GetDeviceList;
+    }
+
+protected:
+    void serializeExtraFields(json &doc) override {
+    }
+
+    void deserializeExtraFields(const json &doc) override {
+    }
+    MessageBase *processRequest(void *context) override {
+        auto lock = static_cast<BleLockServer *>(context);
+        logColor(LColor::Yellow, F("GetDeviceList processRequest"));
+            
+            AccessOnOff* res = new AccessOnOff;
+
+            res->destinationAddress = sourceAddress;
+            res->sourceAddress = destinationAddress;            
+            res->requestUUID = requestUUID;
+
+            for (auto it: BleLockServer::confirmedDevices)
+            {
+                deciceConfirmedStruct dev;
+                dev.mac = it.first;
+                dev.isConfirmed = it.second;
+                res->devices.push_back (dev);
+            }
+            return res;
+    }
+};
+
+
+class AccessOnOFFSingle : public MessageBase {
+public:
+    deciceConfirmedStruct option;
+ 
+    AccessOnOFFSingle() {
+        type = (MessageType)MessageTypeReg::AccessOnOFFSingle;
+    }
+
+protected:
+    void serializeExtraFields(json &doc) override {
+        nlohmann::json j;
+        j[option.mac] = option.isConfirmed;
+        doc["pair"] = j;
+    }
+
+    void deserializeExtraFields(const json &doc) override {
+        auto j = doc["pair"];
+        auto it = j.begin();
+        option.mac = it.key();
+        option.isConfirmed = it.value();
+    }
+
+    MessageBase *processRequest(void *context) override {
+        auto lock = static_cast<BleLockServer *>(context);
+        logColor(LColor::Yellow, F("GetDeviceList processRequest"));
+            
+            BleLockServer::confirmedDevices[option.mac] = option.isConfirmed;
+            BleLockServer::saveConfirmedDevices();
+
+            ResOk *res = new ResOk;
+            res->destinationAddress = sourceAddress;
+            res->sourceAddress = destinationAddress;            
+            res->requestUUID = requestUUID;
+            res->status = true;
+
+            return res;
+    }
+};
+
+
+class AccessOnOFFMulty : public MessageBase {
+public:
+    std::vector<deciceConfirmedStruct> devices;
+ 
+    AccessOnOFFMulty() {
+        type = (MessageType)MessageTypeReg::AccessOnOFFMulty;
+    }
+
+protected:
+    void serializeExtraFields(json &doc) override {
+        for (int i=0; i < devices.size(); i++)
+        {
+            doc[devices[i].mac] = devices[i].isConfirmed;
+        }
+    }
+
+    void deserializeExtraFields(const json &doc) override {
+        devices.clear();
+        for (auto it = doc.begin(); it!=doc.end(); it++)
+        {
+            deciceConfirmedStruct tmp;
+            tmp.mac = it.key();
+            tmp.mac = it.value();
+            devices.push_back(tmp);
+        }
+    }
+
+    MessageBase *processRequest(void *context) override {
+        auto lock = static_cast<BleLockServer *>(context);
+        logColor(LColor::Yellow, F("GetDeviceList processRequest"));
+            
+            for (int i=0; i < devices.size(); i++)
+               BleLockServer::confirmedDevices[devices[i].mac] = devices[i].isConfirmed;
+            BleLockServer::saveConfirmedDevices();
+
+            ResOk *res = new ResOk;
+            res->destinationAddress = sourceAddress;
+            res->sourceAddress = destinationAddress;            
+            res->requestUUID = requestUUID;
+            res->status = true;
+
+            return res;
+    }
+};
 
 #endif
 

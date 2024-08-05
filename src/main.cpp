@@ -20,6 +20,13 @@ void setup() {
     IntSAtringMap::insert ((MessageType)MessageTypeReg::HelloRequest, "HelloRequest");
     IntSAtringMap::insert ((MessageType)MessageTypeReg::ReceivePublic, "ReceivePublic");
 
+    IntSAtringMap::insert ((MessageType)MessageTypeReg::GetDeviceList, "GetDeviceList");
+    IntSAtringMap::insert ((MessageType)MessageTypeReg::AccessOnOff, "AccessOnOff");
+    IntSAtringMap::insert ((MessageType)MessageTypeReg::AccessOnOFFSingle, "AccessOnOFFSingle");
+    IntSAtringMap::insert ((MessageType)MessageTypeReg::AccessOnOFFMulty, "AccessOnOFFMulty");
+
+
+
     bool registerResOk = []() {
         MessageBase::registerConstructor((MessageType)MessageTypeReg::resOk, []() -> MessageBase * { return new ResOk(); });
         return true;
@@ -55,6 +62,27 @@ void setup() {
         MessageBase::registerConstructor((MessageType)MessageTypeReg::ReceivePublic, []() -> MessageBase * { return new ReceivePublic(); });
         return true;
     }();
+
+
+
+    bool registerGetDeviceList = []() {
+        MessageBase::registerConstructor((MessageType)MessageTypeReg::GetDeviceList, []() -> MessageBase * { return new GetDeviceList(); });
+        return true;
+    }();
+    bool registerAccessOnOff = []() {
+        MessageBase::registerConstructor((MessageType)MessageTypeReg::AccessOnOff, []() -> MessageBase * { return new AccessOnOff(); });
+        return true;
+    }();
+    bool registeRAccessOnOFFSingle = []() {
+        MessageBase::registerConstructor((MessageType)MessageTypeReg::AccessOnOFFSingle, []() -> MessageBase * { return new AccessOnOFFSingle(); });
+        return true;
+    }();
+    bool registerAccessOnOFFMulty = []() {
+        MessageBase::registerConstructor((MessageType)MessageTypeReg::AccessOnOFFMulty, []() -> MessageBase * { return new AccessOnOFFMulty(); });
+        return true;
+    }();
+
+
 
 
     if (!SPIFFS.begin(true)) {
