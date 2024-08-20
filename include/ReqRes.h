@@ -500,6 +500,8 @@ protected:
     }
 };
 
+#define HASH_TOP 0xffff
+
 class GetDeviceList : public MessageBase {
 public:
     GetDeviceList() {
@@ -507,6 +509,30 @@ public:
     }
 
 protected:
+
+    std::string hashf (std::vector<uint8_t>& val)
+    {
+        //simple add hash
+        std::string res;
+        uint16_t sum = 0;
+        for (int i = 0; i < val.size(); i++)
+        {
+            sum+= val[i];
+            if (sum>HASH_TOP)
+                sum -= HASH_TOP;
+        }
+        uint16_t mask = 1;
+        for (int it = 0; it < 12; it++)
+        {
+            if (sum & mask)
+                res+= "1";
+            else
+                res+= "0";
+            mask <<= 1;
+        }  
+        return res;      
+    }
+
     void serializeExtraFields(json &doc) override {
     }
 
@@ -524,8 +550,20 @@ protected:
 
             for (auto it: BleLockServer::confirmedDevices)
             {
+                if (lock->secureConnection.keys.find(it.first) == lock->secureConnection.keys.end())
+                {// key not found
+                    lock->secureConnection.generateRSAKeys (it.first);
+                }
+                // generate 12 byte hash
+                std::string localHash = "000000000000";
+                if (lock->secureConnection.keys.find(it.first) != lock->secureConnection.keys.end())
+                {
+                    localHash =  hashf(lock->secureConnection.keys.find(it.first)->second.first);
+                }
+
+                Serial.printf ("MAC:%s  HASH:%s CONFIRMED:%d\n", it.first.c_str(), localHash.c_str(), it.second);
                 deciceConfirmedStruct dev;
-                dev.mac = it.first;
+                dev.mac = it.first + " " + localHash;
                 dev.isConfirmed = it.second;
                 res->devices.push_back (dev);
             }
@@ -559,8 +597,11 @@ protected:
     MessageBase *processRequest(void *context) override {
         auto lock = static_cast<BleLockServer *>(context);
         logColor(LColor::Yellow, F("GetDeviceList processRequest"));
-            
-            BleLockServer::confirmedDevices[option.mac] = option.isConfirmed;
+            std::string confMac;
+            int npos = option.mac.find(" ");
+            confMac = option.mac.substr(0,npos);
+
+            BleLockServer::confirmedDevices[confMac /*option.mac*/] = option.isConfirmed;
             BleLockServer::saveConfirmedDevices();
 
             ResOk *res = new ResOk;
@@ -584,15 +625,19 @@ public:
 
 protected:
     void serializeExtraFields(json &doc) override {
+        nlohmann::json j;
+
         for (int i=0; i < devices.size(); i++)
         {
-            doc[devices[i].mac] = devices[i].isConfirmed;
+            j[devices[i].mac] = devices[i].isConfirmed;
         }
+        doc["list"] = j;
     }
 
     void deserializeExtraFields(const json &doc) override {
         devices.clear();
-        for (auto it = doc.begin(); it!=doc.end(); it++)
+        nlohmann::json j = doc["list"];
+       for (auto it = j.begin(); it!=j.end(); it++)
         {
             deciceConfirmedStruct tmp;
             tmp.mac = it.key();
