@@ -19,7 +19,12 @@ enum class MessageTypeReg {
     GetDeviceList,
     AccessOnOff,
     AccessOnOFFSingle,
-    AccessOnOFFMulty
+    AccessOnOFFMulty,
+
+    ScanWiFi,
+    ScanWiFiResult,
+    LoginWWiFi,
+    GetWiFiStatus
 };
 
 
@@ -659,6 +664,173 @@ protected:
             res->sourceAddress = destinationAddress;            
             res->requestUUID = requestUUID;
             res->status = true;
+
+            return res;
+    }
+};
+
+/**********
+    ScanWiFi,
+    ScanWiFiResult,
+    LoginWWiFi,
+    GetWiFiStatus
+**********/
+struct netListItem
+{
+    String ssid;
+    int32_t rssi;
+    int chanel;
+    bool isProtected;
+};
+
+bool ListWiFiStart();
+bool ListWiFiNext(String &ssid, int32_t &rssi, int &chanel, bool &isProtected);
+void scanWiFi ();
+void SetWiFiPass (String ssid, String pass);
+bool isWiFiConnected ();
+
+
+class ScanWiFiResultMessage : public MessageBase {
+public:
+
+    std::vector<netListItem> list;
+
+
+    ScanWiFiResultMessage() {
+        type = (MessageType)MessageTypeReg::ScanWiFiResult;
+    }
+
+protected:
+
+    void serializeExtraFields(json &doc) override 
+    {
+        nlohmann::json j;
+
+        for (int i=0; i < list.size(); i++)
+        {
+            j[list[i].ssid.c_str()] = list[i].isProtected;
+        }
+        doc["list"] = j;
+    }
+
+    void deserializeExtraFields(const json &doc) override {
+        list.clear();
+        nlohmann::json j = doc["list"];
+       for (auto it = j.begin(); it!=j.end(); it++)
+        {
+            netListItem tmp;
+            tmp.ssid = it.key().c_str();
+            tmp.isProtected = it.value();
+            list.push_back(tmp);
+        }
+    }
+
+    MessageBase *processRequest(void *context) override {
+        auto lock = static_cast<BleLockServer *>(context);
+        logColor(LColor::Yellow, F("ScanWiFiResultMessage processRequest"));
+            return nullptr;
+    }
+};
+
+
+class ScanWiFiMessage : public MessageBase {
+public:
+    ScanWiFiMessage() {
+        type = (MessageType)MessageTypeReg::ScanWiFi;
+    }
+
+protected:
+    void serializeExtraFields(json &doc) override {
+    }
+
+    void deserializeExtraFields(const json &doc) override {
+    }
+
+    MessageBase *processRequest(void *context) override {
+        auto lock = static_cast<BleLockServer *>(context);
+        logColor(LColor::Yellow, F("ScanWiFiMessage processRequest"));
+            
+
+            ScanWiFiResultMessage *res = new ScanWiFiResultMessage;
+            scanWiFi();
+            bool isNoFinish = ListWiFiStart();
+            while (isNoFinish)
+            {
+                netListItem it;
+                isNoFinish = ListWiFiNext(it.ssid,it.rssi,it.chanel,it.isProtected);
+                res->list.push_back (it);
+            }
+
+            res->destinationAddress = sourceAddress;
+            res->sourceAddress = destinationAddress;            
+            res->requestUUID = requestUUID;
+
+            return res;
+    }
+};
+
+
+class LoginWWiFiMessage : public MessageBase {
+public:
+    std::string ssid;
+    std::string pass;
+
+    LoginWWiFiMessage() {
+        type = (MessageType)MessageTypeReg::LoginWWiFi;
+    }
+
+protected:
+    void serializeExtraFields(json &doc) override {
+        doc["ssid"] = ssid;
+        doc["pass"] = pass;
+    }
+
+    void deserializeExtraFields(const json &doc) override {
+        ssid = doc["ssid"];
+        pass = doc["pass"];
+    }
+
+    MessageBase *processRequest(void *context) override {
+        auto lock = static_cast<BleLockServer *>(context);
+        logColor(LColor::Yellow, F("LoginWWiFiMessage processRequest"));
+            
+            SetWiFiPass (ssid.c_str(), pass.c_str());
+            ResOk *res = new ResOk;
+            res->destinationAddress = sourceAddress;
+            res->sourceAddress = destinationAddress;            
+            res->requestUUID = requestUUID;
+            res->status = true;
+
+            return res;
+    }
+};
+
+class GetWiFiStatusMessage : public MessageBase {
+public:
+    std::string ssid;
+    std::string pass;
+
+    GetWiFiStatusMessage() {
+        type = (MessageType)MessageTypeReg::GetWiFiStatus;
+    }
+
+protected:
+    void serializeExtraFields(json &doc) override {
+    }
+
+    void deserializeExtraFields(const json &doc) override {
+    }
+
+    MessageBase *processRequest(void *context) override {
+        auto lock = static_cast<BleLockServer *>(context);
+        logColor(LColor::Yellow, F("GetWiFiStatusMessage processRequest"));
+            
+            SetWiFiPass (ssid.c_str(), pass.c_str());
+            ResOk *res = new ResOk;
+            res->destinationAddress = sourceAddress;
+            res->sourceAddress = destinationAddress;            
+            res->requestUUID = requestUUID;
+            res->status = isWiFiConnected ();
 
             return res;
     }

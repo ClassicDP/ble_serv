@@ -9,6 +9,9 @@ WiFiManager wifiManager;
 BleLockBase * lock;
 std::string LocName = "BleLock";
 
+
+
+
 void setup() {
 
     IntSAtringMap::insert ((MessageType)MessageTypeReg::resOk, "resOk");
@@ -25,6 +28,10 @@ void setup() {
     IntSAtringMap::insert ((MessageType)MessageTypeReg::AccessOnOFFSingle, "AccessOnOFFSingle");
     IntSAtringMap::insert ((MessageType)MessageTypeReg::AccessOnOFFMulty, "AccessOnOFFMulty");
 
+    IntSAtringMap::insert ((MessageType)MessageTypeReg::ScanWiFi, "ScanWiFi");
+    IntSAtringMap::insert ((MessageType)MessageTypeReg::ScanWiFiResult, "ScanWiFiResult");
+    IntSAtringMap::insert ((MessageType)MessageTypeReg::LoginWWiFi, "LoginWWiFi");
+    IntSAtringMap::insert ((MessageType)MessageTypeReg::GetWiFiStatus, "GetWiFiStatus");
 
 
     bool registerResOk = []() {
@@ -84,6 +91,24 @@ void setup() {
 
 
 
+    bool registerScanWiFi = []() {
+        MessageBase::registerConstructor((MessageType)MessageTypeReg::ScanWiFi, []() -> MessageBase * { return new ScanWiFiMessage(); });
+        return true;
+    }();
+    bool registerScanWiFiResult = []() {
+        MessageBase::registerConstructor((MessageType)MessageTypeReg::ScanWiFiResult, []() -> MessageBase * { return new ScanWiFiResultMessage(); });
+        return true;
+    }();
+    bool registerLoginWWiFi = []() {
+        MessageBase::registerConstructor((MessageType)MessageTypeReg::LoginWWiFi, []() -> MessageBase * { return new LoginWWiFiMessage(); });
+        return true;
+    }();
+    bool registerGetWiFiStatus = []() {
+        MessageBase::registerConstructor((MessageType)MessageTypeReg::GetWiFiStatus, []() -> MessageBase * { return new GetWiFiStatusMessage(); });
+        return true;
+    }();
+
+
 
     if (!SPIFFS.begin(true)) {
         logColor(LColor::Red, F("An error has occurred while mounting SPIFFS"));
@@ -107,4 +132,19 @@ void loop() {
 
         lastTempCheck = millis();
     }
+}
+
+void scanWiFi ()
+{
+    wifiManager.scanWiFi();
+}
+
+void SetWiFiPass (String ssid, String pass)
+{
+    wifiManager.setProperties (ssid,pass);
+}
+
+bool isWiFiConnected ()
+{
+    return wifiManager.getIsConnected();
 }

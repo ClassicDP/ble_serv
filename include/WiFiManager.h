@@ -15,6 +15,13 @@ public:
     void loop();
     String loadFile(const char* path);
 
+    void scanWiFi ();
+    void setProperties (String ssid, String pass);
+    bool getIsConnected ()
+    {
+        return WiFi.status() == WL_CONNECTED;
+    }
+
 private:
     void connectToSavedNetwork();
     void startAPMode();
